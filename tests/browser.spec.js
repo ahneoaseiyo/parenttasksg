@@ -34,7 +34,7 @@ test("consent cannot be completed through the checklist and preview does not sub
   await page.getByRole("button", { name: /Sign/i, exact: true }).click();
   await page.getByPlaceholder("e.g. Tan Mei Ling").fill("Mei Ling Tan");
   await page.getByPlaceholder("+65 9XXX XXXX").fill("91234567");
-  await page.getByText("I agree to the terms above").click();
+  await page.locator("label").filter({ hasText: "I agree to the terms above" }).locator("div").click();
   await page.getByRole("button", { name: /Preview consent/ }).click();
   await expect(page.getByText("Demo consent preview only")).toBeVisible();
   await expect(page.getByText(/No consent was sent or recorded/)).toBeVisible();
