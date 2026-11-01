@@ -1,3 +1,4 @@
+import { createOidcVerifier } from "./oidcAuth.js";
 import { openRosterStore } from "./rosterStore.js";
 import { openConsentStore } from "./consentStore.js";
 import { openTaskStore } from "./taskStore.js";
@@ -175,16 +176,18 @@ function demoExtract(message, settings) {
   return { language, tasks, requiresApproval: settings.aiApprovalRequired };
 }
 
-function authenticate(req, res, next) {
-  if (!req.app.locals.demoAuthEnabled) {
-    return res.status(503).json({ error: "Demo token authentication is disabled in production" });
-  }
+async function authenticate(req, res, next) {
   const authHeader = req.header("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Authentication required" });
   }
   const token = authHeader.slice(7).trim();
-  const principal = principalsByToken.get(token);
+  let principal;
+  if (req.app.locals.demoAuthEnabled) principal=principalsByToken.get(token);
+  else if (req.app.locals.verifyAccessToken) {
+    try { principal=await req.app.locals.verifyAccessToken(token); }
+    catch { return res.status(401).json({error:"Invalid access token"}); }
+  } else return res.status(503).json({error:"OIDC authentication not configured"});
   if (!principal) {
     return res.status(401).json({ error: "Invalid token" });
   }
@@ -365,9 +368,19 @@ function validateSettingsPatchPayload(rawPayload) {
   return { value: patch };
 }
 
-export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath = process.env.TASK_DB_PATH } = {}) {
+export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath = process.env.TASK_DB_PATH, verifyAccessToken } = {}) {
   const app = express();
   app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
+  app.locals.verifyAccessToken = verifyAccessToken || null;
+  if (!app.locals.demoAuthEnabled && !app.locals.verifyAccessToken &&
+    process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE &&
+    process.env.OIDC_JWKS_URL && process.env.OIDC_IDENTITY_MAP_JSON) {
+    app.locals.verifyAccessToken=createOidcVerifier({
+      issuer:process.env.OIDC_ISSUER,audience:process.env.OIDC_AUDIENCE,
+      jwksUrl:process.env.OIDC_JWKS_URL,
+      identities:JSON.parse(process.env.OIDC_IDENTITY_MAP_JSON)
+    });
+  }
   const state = buildInitialState();
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
   const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
