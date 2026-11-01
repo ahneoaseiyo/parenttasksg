@@ -1,3 +1,4 @@
+import { openRosterStore } from "./rosterStore.js";
 import { openConsentStore } from "./consentStore.js";
 import { openTaskStore } from "./taskStore.js";
 import express from "express";
@@ -326,11 +327,6 @@ function validateConsentPayload(rawPayload) {
   return { value: { childId, consentRequestId, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
 }
 
-function parentOwnsChild(state, centreId, parentUserId, childId) {
-  return state.children.some((child) => child.id === childId && child.centreId === centreId) &&
-    state.parentChildLinks.some((link) => link.centreId === centreId && link.parentUserId === parentUserId && link.childId === childId);
-}
-
 function validateSettingsPatchPayload(rawPayload) {
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
   const allowedKeys = new Set(["retentionMonths", "aiApprovalRequired", "notificationChannels", "sensitiveFieldMasking"]);
@@ -375,7 +371,9 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   const state = buildInitialState();
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
   const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
+  const rosterStore = taskStore ? openRosterStore(taskDbPath,state.children,state.parentChildLinks) : null;
   app.locals.closeTaskStore = () => {
+    rosterStore?.close();
     consentStore?.close();
     taskStore?.close();
   };
@@ -496,7 +494,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   app.get("/api/consent-requests", requireRoles(ROLE_PARENT,ROLE_TEACHER,ROLE_ADMIN), (req,res) => {
     if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
     const childIds=req.auth.role===ROLE_PARENT
-      ? state.parentChildLinks.filter(link=>link.centreId===req.auth.centreId&&link.parentUserId===req.auth.userId).map(link=>link.childId)
+      ? rosterStore.childrenForParent(req.auth.centreId,req.auth.userId).map(child=>child.id)
       : null;
     return res.json(consentStore.listRequests(req.auth.centreId,childIds));
   });
@@ -510,7 +508,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       !Array.isArray(body.childIds) || !body.childIds.length ||
       new Set(body.childIds).size!==body.childIds.length ||
       !body.childIds.every(id=>isNonEmptyString(id) &&
-        state.children.some(child=>child.id===id&&child.centreId===req.auth.centreId)) ||
+        rosterStore.child(req.auth.centreId,id)) ||
       typeof body.expiresAt!=="string" || !/^\d{4}-\d{2}-\d{2}T/.test(body.expiresAt) ||
       !Number.isFinite(Date.parse(body.expiresAt)) ||
       new Date(body.expiresAt).toISOString()!==body.expiresAt ||
@@ -553,11 +551,11 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   app.post("/api/consents", requireRoles(ROLE_PARENT), (req, res) => {
     const parsed = validateConsentPayload(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    if (!parentOwnsChild(state, req.auth.centreId, req.auth.userId, parsed.value.childId)) {
+    if (!rosterStore || !rosterStore.ownsChild(req.auth.centreId, req.auth.userId, parsed.value.childId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const child = state.children.find((entry) => entry.id === parsed.value.childId && entry.centreId === req.auth.centreId);
+    const child = rosterStore.child(req.auth.centreId,parsed.value.childId);
     const submission = {
       id: nanoid(),
       submittedAt: new Date().toISOString(),
