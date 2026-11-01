@@ -27,6 +27,14 @@ API health check:
 http://127.0.0.1:8787/health
 ```
 
+API endpoints under `/api/*` now require a synthetic bearer token for prototype-only role simulation:
+
+- `token_parent_mei_ling_centre_a`
+- `token_parent_hafiz_centre_a`
+- `token_teacher_centre_a`
+- `token_admin_centre_a`
+- `token_teacher_centre_b`
+
 ## Useful Commands
 
 ```bash
