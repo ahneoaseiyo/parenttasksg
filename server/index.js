@@ -1,3 +1,4 @@
+import { openTaskStore } from "./taskStore.js";
 import express from "express";
 import cors from "cors";
 import { nanoid } from "nanoid";
@@ -365,10 +366,12 @@ function validateSettingsPatchPayload(rawPayload) {
   return { value: patch };
 }
 
-export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
+export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath = process.env.TASK_DB_PATH } = {}) {
   const app = express();
   app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
   const state = buildInitialState();
+  const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
+  app.locals.closeTaskStore = () => taskStore?.close();
 
   app.use(
     cors({
@@ -389,7 +392,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
   app.use("/api", authenticate);
 
   app.get("/api/tasks", (req, res) => {
-    const tasks = state.tasks.filter((task) => {
+    const tasks = (taskStore ? taskStore.list(req.auth.centreId, req.auth.role === ROLE_PARENT ? req.auth.userId : null) : state.tasks).filter((task) => {
       if (task.centreId !== req.auth.centreId) return false;
       if (req.auth.role === ROLE_PARENT) return task.parentUserId === req.auth.userId;
       return true;
@@ -401,22 +404,23 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
     const parsed = validateTaskCreatePayload(req.body, req.auth.centreId);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const task = { id: nanoid(), status: "Not done", centreId: req.auth.centreId, ...parsed.value };
-    state.tasks.unshift(task);
+    if (taskStore) taskStore.create(task);
+    else state.tasks.unshift(task);
     audit(state, "Teacher", `Created task: ${task.title}`, req.auth.centreId, "Task");
     res.status(201).json(task);
   });
 
   app.patch("/api/tasks/:id", (req, res) => {
-    const task = state.tasks.find((entry) => entry.id === req.params.id);
+    const task = taskStore ? taskStore.get(req.params.id) : state.tasks.find((entry) => entry.id === req.params.id);
     if (!task) return res.status(404).json({ error: "Task not found" });
     if (denyIfNotInCentre(req, res, task)) return undefined;
     if (denyIfNotResourceOwner(req, res, task)) return undefined;
 
     const parsed = validateTaskPatchPayload(req.body, req.auth.role);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    Object.assign(task, parsed.value);
+    const savedTask = taskStore ? taskStore.update(task.id, parsed.value) : Object.assign(task, parsed.value);
     audit(state, "User", `Updated task: ${task.title}`, req.auth.centreId, "Task");
-    return res.json(task);
+    return res.json(savedTask);
   });
 
   app.get("/api/broadcasts", (req, res) => {
