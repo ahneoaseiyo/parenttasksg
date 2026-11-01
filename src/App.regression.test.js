@@ -12,8 +12,10 @@ test("parent checklist has child filters and task groups", () => {
 
 test("task completion is accessible and consent cannot be marked done directly", () => {
   assert.match(source, /aria-pressed=\{done\}/);
-  assert.match(source, /disabled=\{task\.category==="Consent form"\}/);
+  assert.match(source, /disabled=\{task\.category==="Consent form"\|\|\(verifiedMode&&apiBusy\)\}/);
   assert.match(source, /t\.category!=="Consent form"/);
+  assert.match(source, /if\(verifiedMode\)\{ onVerifiedToggle\(id\); return; \}/);
+  assert.match(source, /saveVerifiedStatus\(taskApi,task\)/);
 });
 
 test("consent preview cannot claim server submission or auto-complete a task", () => {
