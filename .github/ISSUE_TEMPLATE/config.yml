@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Governance note
+    url: https://github.com/ahneoaseiyo/parenttasksg/blob/main/docs/AI_TEAM.md
+    about: Use founder-approved issues with explicit acceptance criteria before implementation.

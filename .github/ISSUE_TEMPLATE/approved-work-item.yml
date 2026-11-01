@@ -1,0 +1,43 @@
+name: Approved work item
+description: Track scoped, approval-gated engineering work for Copilot implementation.
+title: "[Work] "
+labels:
+  - needs-approval
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: Describe the user or engineering problem being solved.
+      placeholder: We need to...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List explicit, testable acceptance criteria.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: test-plan
+    attributes:
+      label: Test plan
+      description: Describe validation steps for this issue.
+      placeholder: |
+        - Run ...
+        - Verify ...
+    validations:
+      required: true
+  - type: checkboxes
+    id: approvals
+    attributes:
+      label: Approval and handoff gates
+      options:
+        - label: Founder approved this issue for implementation
+          required: true
+        - label: Independent Gemini review will be manual (safe diff + context shared by a human)
+          required: true
