@@ -105,7 +105,7 @@ test("consent submission cannot spoof another parent", async () => {
         "content-type": "application/json",
         ...authHeader(AUTH_TOKENS.parentMeiLingCentreA),
       },
-      body: JSON.stringify({ child: "Arielle", parentUserId: "parent_hafiz" }),
+      body: JSON.stringify({ childId: "child_arielle_a", parentUserId: "parent_hafiz" }),
     });
 
     assert.equal(response.status, 400);
@@ -123,7 +123,7 @@ test("consent submission is denied for unrelated child", async () => {
         "content-type": "application/json",
         ...authHeader(AUTH_TOKENS.parentHafizCentreA),
       },
-      body: JSON.stringify({ child: "Arielle" }),
+      body: JSON.stringify({ childId: "child_arielle_a" }),
     });
 
     assert.equal(response.status, 403);
@@ -177,7 +177,7 @@ test("cross-centre consent records are isolated", async () => {
         "content-type": "application/json",
         ...authHeader(AUTH_TOKENS.parentMeiLingCentreA),
       },
-      body: JSON.stringify({ child: "Arielle", decision: "agree" }),
+      body: JSON.stringify({ childId: "child_arielle_a", decision: "agree" }),
     });
     assert.equal(submitResponse.status, 201);
 
@@ -201,6 +201,21 @@ test("demo authentication is disabled unless explicitly enabled", async () => {
       headers: authHeader(AUTH_TOKENS.adminCentreA),
     });
     assert.equal(response.status, 503);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test("consent requires stable child ID and rejects name-only input", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const response = await fetch(`${baseUrl}/api/consents`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeader(AUTH_TOKENS.parentMeiLingCentreA) },
+      body: JSON.stringify({ child: "Arielle", decision: "agree" }),
+    });
+    assert.equal(response.status, 400);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
