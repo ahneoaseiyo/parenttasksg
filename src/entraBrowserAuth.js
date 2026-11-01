@@ -22,9 +22,11 @@ export function validateBrowserAuthConfig({authority,clientId,apiScope,redirectU
   catch {throw new Error("Invalid browser OIDC URL");}
   if(url.protocol!=="https:" || url.username || url.password || url.port || !/^[a-z0-9-]+\.ciamlogin\.com$/i.test(url.hostname) ||
      !/^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname) || url.search || url.hash ||
-     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId) ||\n     !/^[^\\s?#]+\\/[^\\s?#]+$/.test(apiScope) ||
+     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId) ||
+     !/^[^\\s?#]+\\/[^\\s?#]+$/.test(apiScope) ||
      (redirect.protocol!=="https:" && !(redirect.protocol==="http:" && ["localhost","127.0.0.1"].includes(redirect.hostname))) ||
-     redirect.username || redirect.password || redirect.hash || redirect.search ||\n     (redirect.protocol==="https:" && !redirect.hostname))
+     redirect.username || redirect.password || redirect.hash || redirect.search ||
+     (redirect.protocol==="https:" && !redirect.hostname))
     throw new Error("Invalid browser OIDC configuration");
   return {authority:url.origin+url.pathname.replace(/\/$/,""),clientId,apiScope,redirectUri};
 }
@@ -48,7 +50,8 @@ export function consumeEntraCallback({search,sessionStorage,now=Date.now()}) {
   const tx=JSON.parse(saved),params=new URLSearchParams(search);
   if(!tx.createdAt || now-tx.createdAt>300000 || now<tx.createdAt ||
      params.getAll("state").length!==1 || params.get("state")!==tx.state ||
-     params.has("error") || params.getAll("code").length!==1 || !params.get("code") ||\n     !/^[a-zA-Z0-9._~-]{43,128}$/.test(tx.verifier) || !tx.authority || !tx.redirectUri)
+     params.has("error") || params.getAll("code").length!==1 || !params.get("code") ||
+     !/^[a-zA-Z0-9._~-]{43,128}$/.test(tx.verifier) || !tx.authority || !tx.redirectUri)
     throw new Error("Login callback rejected");
   return {code:params.get("code"),verifier:tx.verifier,nonce:tx.nonce,
     redirectUri:tx.redirectUri,authority:tx.authority,clientId:tx.clientId,apiScope:tx.apiScope};
