@@ -369,10 +369,11 @@ function validateSettingsPatchPayload(rawPayload) {
   return { value: patch };
 }
 
-export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath = process.env.TASK_DB_PATH, verifyAccessToken } = {}) {
+export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath = process.env.TASK_DB_PATH, verifyAccessToken, verifyEnrolment } = {}) {
   const app = express();
   app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
   app.locals.verifyAccessToken = verifyAccessToken || null;
+  app.locals.verifyEnrolment = typeof verifyEnrolment === 'function' ? verifyEnrolment : null;
   const state = buildInitialState();
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
   const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
@@ -517,7 +518,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     const body=req.body;
     if(!body || typeof body!=="object" || Array.isArray(body) ||
       !hasOnlyKnownKeys(body,new Set(["issuer","subject","userId","role"])) ||
-      ![body.issuer,body.subject,body.userId].every(isNonEmptyString) ||
+      ![body.issuer,body.subject,body.userId].every(value => isNonEmptyString(value)) ||
       !["parent","teacher"].includes(body.role))
       return res.status(400).json({error:"Invalid identity"});
     try {
@@ -548,7 +549,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     rosterStore.addChild(child,rosterAudit(req,"enrolment.child_created",child.id));
     return res.status(201).json(child);
   });
-  app.post("/api/enrolments/links",requireRoles(ROLE_ADMIN),(req,res)=>{
+  app.post("/api/enrolments/links",requireRoles(ROLE_ADMIN),async(req,res)=>{
     if(!rosterStore)return res.status(503).json({error:"Roster storage unavailable"});
     const body=req.body;
     if(!body || typeof body!=="object" || Array.isArray(body) ||
@@ -559,6 +560,20 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
         (app.locals.demoAuthEnabled && parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId)) :
         app.locals.demoAuthEnabled && parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId)))
       return res.status(400).json({error:"Invalid parent link or verification reference"});
+    // A typed reference is not verification. Non-demo links require a trusted school-side verifier.
+    if (!app.locals.demoAuthEnabled) {
+      if (!app.locals.verifyEnrolment)
+        return res.status(503).json({error:"School enrolment verification not configured"});
+      let verified=false;
+      try {
+        verified=await app.locals.verifyEnrolment({
+          centreId:req.auth.centreId,childId:body.childId,
+          parentUserId:body.parentUserId,verificationReference:body.verificationReference,
+          administratorId:req.auth.userId
+        }) === true;
+      } catch {return res.status(503).json({error:"School enrolment verification unavailable"});}
+      if (!verified)return res.status(403).json({error:"Enrolment relationship not verified"});
+    }
     try {
       const result=rosterStore.linkParent(req.auth.centreId,body.parentUserId,body.childId,
         rosterAudit(req,"enrolment.parent_linked",body.childId));
