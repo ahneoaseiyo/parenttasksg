@@ -176,7 +176,7 @@ function demoExtract(message, settings) {
   return { language, tasks, requiresApproval: settings.aiApprovalRequired };
 }
 
-async function authenticate(req, res, next) {
+async async function authenticate(req, res, next) {
   const authHeader = req.header("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Authentication required" });
