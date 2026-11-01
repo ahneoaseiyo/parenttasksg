@@ -1,3 +1,4 @@
+import { openConsentStore } from "./consentStore.js";
 import { openTaskStore } from "./taskStore.js";
 import express from "express";
 import cors from "cors";
@@ -308,19 +309,21 @@ function validateBroadcastCreatePayload(rawPayload) {
 
 function validateConsentPayload(rawPayload) {
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
-  const allowedKeys = new Set(["childId", "decision", "notes"]);
+  const allowedKeys = new Set(["childId", "consentRequestId", "decision", "notes"]);
   if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected consent fields" };
 
   const childId = normalizeShortText(payload.childId);
   if (!isNonEmptyString(childId)) return { error: "Consent childId is required" };
 
+  const consentRequestId = normalizeOptionalShortText(payload.consentRequestId);
+  if (consentRequestId !== undefined && !isNonEmptyString(consentRequestId)) return { error: "Invalid consent request ID" };
   const decision = normalizeOptionalShortText(payload.decision);
   if (decision !== undefined && !isNonEmptyString(decision)) return { error: "Invalid consent payload" };
 
   const notes = normalizeOptionalNote(payload.notes);
   if (notes !== undefined && !isNonEmptyString(notes, MAX_NOTE_LENGTH)) return { error: "Invalid consent payload" };
 
-  return { value: { childId, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
+  return { value: { childId, consentRequestId: consentRequestId ?? "legacy-demo", ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
 }
 
 function parentOwnsChild(state, centreId, parentUserId, childId) {
@@ -371,7 +374,11 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
   const state = buildInitialState();
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
-  app.locals.closeTaskStore = () => taskStore?.close();
+  const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
+  app.locals.closeTaskStore = () => {
+    consentStore?.close();
+    taskStore?.close();
+  };
 
   app.use(
     cors({
@@ -482,7 +489,9 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   });
 
   app.get("/api/consents", requireRoles(ROLE_PARENT, ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
-    const submissions = state.consentSubmissions.filter((submission) => {
+    const submissions = (consentStore
+      ? consentStore.list(req.auth.centreId, req.auth.role === ROLE_PARENT ? req.auth.userId : null)
+      : state.consentSubmissions).filter((submission) => {
       if (submission.centreId !== req.auth.centreId) return false;
       if (req.auth.role === ROLE_PARENT) return submission.parentUserId === req.auth.userId;
       return true;
@@ -506,9 +515,28 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       child: child.name,
       ...parsed.value,
     };
-    state.consentSubmissions.unshift(submission);
-    audit(state, "Parent", `Submitted consent for ${submission.child || "child"}`, req.auth.centreId, "Consent");
-    res.status(201).json(submission);
+    if (consentStore) {
+      try {
+        consentStore.create(submission, {
+          id: nanoid(), centreId: req.auth.centreId, time: submission.submittedAt,
+          actorId: req.auth.userId, actorRole: req.auth.role,
+          action: "consent.submitted", resourceType: "Consent", resourceId: submission.id,
+        });
+      } catch (error) {
+        if (error.code === "ERR_SQLITE_ERROR" && /UNIQUE constraint failed/.test(error.message)) {
+          return res.status(409).json({ error: "Consent already submitted for this child and request" });
+        }
+        throw error;
+      }
+    } else {
+      if (state.consentSubmissions.some((entry) => entry.centreId === submission.centreId &&
+        entry.childId === submission.childId && entry.consentRequestId === submission.consentRequestId)) {
+        return res.status(409).json({ error: "Consent already submitted for this child and request" });
+      }
+      state.consentSubmissions.unshift(submission);
+      audit(state, "Parent", `Submitted consent for ${submission.child || "child"}`, req.auth.centreId, "Consent");
+    }
+    return res.status(201).json(submission);
   });
 
   const extractionUsage = new Map();
