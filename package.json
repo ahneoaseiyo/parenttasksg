@@ -8,7 +8,8 @@
     "api": "node server/index.js",
     "test": "node --test",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "check:server": "node --check server/index.js && node --input-type=module -e \"import('./server/index.js').then(m => { const app=m.createApp({enableDemoAuth:false}); if(!app) process.exit(1); app.locals.closeTaskStore(); })\""
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
