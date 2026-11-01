@@ -373,20 +373,20 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   const app = express();
   app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
   app.locals.verifyAccessToken = verifyAccessToken || null;
-  if (!app.locals.demoAuthEnabled && !app.locals.verifyAccessToken &&
-    process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE &&
-    process.env.OIDC_JWKS_URL && process.env.OIDC_IDENTITY_MAP_JSON) {
-    app.locals.verifyAccessToken=createOidcVerifier({
-      issuer:process.env.OIDC_ISSUER,audience:process.env.OIDC_AUDIENCE,
-      jwksUrl:process.env.OIDC_JWKS_URL,
-      identities:JSON.parse(process.env.OIDC_IDENTITY_MAP_JSON)
-    });
-  }
   const state = buildInitialState();
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
   const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
   const rosterStore = taskStore ? openRosterStore(taskDbPath,state.children,state.parentChildLinks) : null;
   const identityStore = taskStore ? openIdentityStore(taskDbPath) : null;
+  if (!app.locals.demoAuthEnabled && !app.locals.verifyAccessToken &&
+    process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE && process.env.OIDC_JWKS_URL) {
+    if (!identityStore) throw new Error("Persistent identity storage is required for OIDC authentication");
+    app.locals.verifyAccessToken=createOidcVerifier({
+      issuer:process.env.OIDC_ISSUER,audience:process.env.OIDC_AUDIENCE,
+      jwksUrl:process.env.OIDC_JWKS_URL,
+      resolveIdentity:(issuer,subject)=>identityStore.resolve(issuer,subject)
+    });
+  }
   app.locals.closeTaskStore = () => {
     identityStore?.close();
     rosterStore?.close();
