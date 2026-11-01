@@ -27,6 +27,16 @@ API health check:
 http://127.0.0.1:8787/health
 ```
 
+API endpoints under `/api/*` now require a synthetic bearer token for development-only role simulation:
+
+- `token_parent_mei_ling_centre_a`
+- `token_parent_hafiz_centre_a`
+- `token_teacher_centre_a`
+- `token_admin_centre_a`
+- `token_teacher_centre_b`
+
+These static demo tokens are intentionally disabled when `NODE_ENV=production`. This prototype auth mode must not be used for real users or live pilot deployments.
+
 ## Useful Commands
 
 ```bash
@@ -41,4 +51,4 @@ npm run preview
 - The government buyer brief is available from "View government buyer brief".
 - The centre admin console is available from "Centre admin console".
 - AI extraction is simulated in the frontend demo. A production version should route extraction through an approved backend with audit logging, access controls, and no API keys exposed to the browser.
-- A lightweight Express API prototype is included under `server/`. It is intentionally simple and should be replaced with authenticated routes, a real database, and production deployment controls before any live pilot.
+- A lightweight Express API prototype is included under `server/`. It is intentionally simple and should be replaced with production authentication, a real database, and deployment controls before any live pilot.
