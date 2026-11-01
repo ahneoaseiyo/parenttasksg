@@ -23,7 +23,7 @@ export function validateBrowserAuthConfig({authority,clientId,apiScope,redirectU
   if(url.protocol!=="https:" || url.username || url.password || url.port || !/^[a-z0-9-]+\.ciamlogin\.com$/i.test(url.hostname) ||
      !/^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname) || url.search || url.hash ||
      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId) ||
-     !/^[^\\s?#]+\\/[^\\s?#]+$/.test(apiScope) ||
+     (!apiScope.includes("/") || /\s|[?#]/.test(apiScope)) ||
      (redirect.protocol!=="https:" && !(redirect.protocol==="http:" && ["localhost","127.0.0.1"].includes(redirect.hostname))) ||
      redirect.username || redirect.password || redirect.hash || redirect.search ||
      (redirect.protocol==="https:" && !redirect.hostname))
