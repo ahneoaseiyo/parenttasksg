@@ -37,7 +37,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
       - name: Check server syntax
-        run: node --check server/index.js
+        run: npm run check:server
       - name: Run tests
         run: npm test
       - name: Build frontend
