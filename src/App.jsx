@@ -1142,6 +1142,7 @@ function ExtractScreen({setTasks,onBack}){
 // ── DASHBOARD (mobile-first) ──────────────────────────────────────────────────
 function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onConsentForm}){
   const [activeFilter,setActiveFilter]=useState("all");
+  const [selectedChild,setSelectedChild]=useState("all");
   const [q,setQ]=useState("");
 
   const pending=tasks.filter(t=>t.status!=="Done");
@@ -1151,8 +1152,18 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
 
   const filterMap={all:tasks,pending,urgent,done};
   const filtered=useMemo(()=>(filterMap[activeFilter]||tasks).filter(t=>
-    t.title.toLowerCase().includes(q.toLowerCase())||t.category.toLowerCase().includes(q.toLowerCase())
-  ),[tasks,activeFilter,q]);
+    (selectedChild==="all"||t.child===selectedChild)&&
+    (t.title.toLowerCase().includes(q.toLowerCase())||t.category.toLowerCase().includes(q.toLowerCase()))
+  ),[tasks,activeFilter,q,selectedChild]);
+  const children=[...new Set(tasks.map(t=>t.child))];
+  const grouped=useMemo(()=>{
+    const groups=[["Tomorrow",[]],["Other upcoming",[]],["Completed",[]]];
+    filtered.forEach(t=>{
+      const index=t.status==="Done"?2:t.dueLabel==="Tomorrow"?0:1;
+      groups[index][1].push(t);
+    });
+    return groups.filter(([,items])=>items.length);
+  },[filtered]);
 
   function toggle(id){setTasks(p=>p.map(t=>t.id===id?{...t,status:t.status==="Done"?"Not done":"Done"}:t));}
   function shareT(id){setTasks(p=>p.map(t=>t.id===id&&!t.sharedWith.length?{...t,sharedWith:["Caregiver"]}:t));}
@@ -1202,6 +1213,11 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
           ))}
         </div>
 
+        {/* Filter tasks by child */}
+        <div role="group" aria-label="Filter by child" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+          {["all",...children].map(child=><button key={child} aria-pressed={selectedChild===child} onClick={()=>setSelectedChild(child)} style={{minHeight:44,padding:"8px 16px",borderRadius:24,border:`1px solid ${selectedChild===child?C.green:C.border}`,background:selectedChild===child?C.green:C.white,color:selectedChild===child?C.white:C.ink,fontWeight:700,cursor:"pointer"}}>{child==="all"?"Everyone":child}</button>)}
+        </div>
+
         {/* Search */}
         <div style={{position:"relative",marginBottom:16}}>
           <svg style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -1229,13 +1245,15 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
             </motion.div>
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {filtered.map(task=>{
+              {grouped.flatMap(([groupName,items])=>[
+                <h2 key={`group-${groupName}`} style={{fontSize:14,fontWeight:800,color:C.ink,margin:"14px 0 2px"}}>{groupName}</h2>,
+                ...items.map(task=>{
                 const done=task.status==="Done";
                 const pDot=task.priority==="High"?C.red:task.priority==="Medium"?C.amber:"#D1D5DB";
                 return(
                   <motion.div key={task.id} layout initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0,scale:.96}} transition={{duration:.18}}>
                     <div style={{background:done?"#FAFAF8":C.white,borderRadius:16,border:`1px solid ${done?"#EFEFEA":C.border}`,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
-                      <button onClick={()=>toggle(task.id)} aria-label="Toggle"
+                      <button onClick={()=>toggle(task.id)} aria-label={`${done?"Mark not done":"Mark done"}: ${task.title}`} aria-pressed={done}
                         style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?C.ink:"#D1D5DB"}`,background:done?C.ink:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
                         {done&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </button>
@@ -1259,7 +1277,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
                                 ✍️ Sign
                               </button>
                             )}
-                            <button onClick={()=>shareT(task.id)} style={{border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",cursor:"pointer",fontSize:11,color:C.muted,fontWeight:600,padding:"4px 10px"}}>
+                            <button onClick={()=>shareT(task.id)} aria-label={`Share ${task.title}`} style={{border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",cursor:"pointer",fontSize:11,color:C.muted,fontWeight:600,padding:"4px 10px"}}>
                               🔗 Share
                             </button>
                           </div>
@@ -1268,7 +1286,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
                     </div>
                   </motion.div>
                 );
-              })}
+              })])}
             </div>
           )}
         </AnimatePresence>
@@ -1296,7 +1314,7 @@ function ConsentFormScreen({task, onSign, onBack}){
   const [medNeeds, setMedNeeds] = useState("None");
   const [signed, setSigned] = useState(false);
   const canSign = parentName.trim() && contact.trim() && agreed;
-  const today = "22 May 2026";
+  const today = new Date().toLocaleDateString("en-SG",{day:"numeric",month:"short",year:"numeric"});
 
   function handleSign(){
     if(!canSign) return;
