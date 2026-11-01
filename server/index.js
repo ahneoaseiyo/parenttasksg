@@ -105,6 +105,8 @@ function buildInitialState() {
         ],
       },
     ],
+    children: [{ id: "child_arielle_a", centreId: "centre_a", name: "Arielle" }],
+    parentChildLinks: [{ centreId: "centre_a", parentUserId: "parent_mei_ling", childId: "child_arielle_a" }],
     consentSubmissions: [],
     auditEvents: [
       {
@@ -305,11 +307,11 @@ function validateBroadcastCreatePayload(rawPayload) {
 
 function validateConsentPayload(rawPayload) {
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
-  const allowedKeys = new Set(["child", "decision", "notes"]);
+  const allowedKeys = new Set(["childId", "decision", "notes"]);
   if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected consent fields" };
 
-  const child = normalizeShortText(payload.child);
-  if (!isNonEmptyString(child)) return { error: "Consent child is required" };
+  const childId = normalizeShortText(payload.childId);
+  if (!isNonEmptyString(childId)) return { error: "Consent childId is required" };
 
   const decision = normalizeOptionalShortText(payload.decision);
   if (decision !== undefined && !isNonEmptyString(decision)) return { error: "Invalid consent payload" };
@@ -317,13 +319,12 @@ function validateConsentPayload(rawPayload) {
   const notes = normalizeOptionalNote(payload.notes);
   if (notes !== undefined && !isNonEmptyString(notes, MAX_NOTE_LENGTH)) return { error: "Invalid consent payload" };
 
-  return { value: { child, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
+  return { value: { childId, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
 }
 
-function parentOwnsChild(state, centreId, parentUserId, child) {
-  return state.tasks.some(
-    (task) => task.centreId === centreId && task.parentUserId === parentUserId && task.child === child,
-  );
+function parentOwnsChild(state, centreId, parentUserId, childId) {
+  return state.children.some((child) => child.id === childId && child.centreId === centreId) &&
+    state.parentChildLinks.some((link) => link.centreId === centreId && link.parentUserId === parentUserId && link.childId === childId);
 }
 
 function validateSettingsPatchPayload(rawPayload) {
@@ -471,15 +472,17 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
   app.post("/api/consents", requireRoles(ROLE_PARENT), (req, res) => {
     const parsed = validateConsentPayload(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    if (!parentOwnsChild(state, req.auth.centreId, req.auth.userId, parsed.value.child)) {
+    if (!parentOwnsChild(state, req.auth.centreId, req.auth.userId, parsed.value.childId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    const child = state.children.find((entry) => entry.id === parsed.value.childId && entry.centreId === req.auth.centreId);
     const submission = {
       id: nanoid(),
       submittedAt: new Date().toISOString(),
       centreId: req.auth.centreId,
       parentUserId: req.auth.userId,
+      child: child.name,
       ...parsed.value,
     };
     state.consentSubmissions.unshift(submission);
