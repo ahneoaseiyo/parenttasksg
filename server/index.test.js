@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp, AUTH_TOKENS } from "./index.js";
 
-async function startServer() {
-  const app = createApp();
+async function startServer({ enableDemoAuth = true } = {}) {
+  const app = createApp({ enableDemoAuth });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
   });
@@ -188,6 +188,19 @@ test("cross-centre consent records are isolated", async () => {
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.deepEqual(payload, []);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test("demo authentication is disabled unless explicitly enabled", async () => {
+  const { server, baseUrl } = await startServer({ enableDemoAuth: false });
+  try {
+    const response = await fetch(`${baseUrl}/api/tasks`, {
+      headers: authHeader(AUTH_TOKENS.adminCentreA),
+    });
+    assert.equal(response.status, 503);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
