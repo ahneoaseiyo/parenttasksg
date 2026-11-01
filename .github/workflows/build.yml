@@ -1,0 +1,42 @@
+name: Prototype build verification
+on:
+  pull_request:
+  push:
+    branches: [main, setup/ai-company-phase1]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract archived prototype if source files are not yet committed
+        shell: bash
+        run: |
+          if [ ! -f package.json ]; then
+            python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          archive = Path("parenttask-sg-github-upload.zip")
+          with zipfile.ZipFile(archive) as z:
+              for item in z.infolist():
+                  path = Path(item.filename.replace("\\", "/"))
+                  if path.is_absolute() or ".." in path.parts:
+                      raise ValueError("Unsafe archive path")
+                  if item.is_dir():
+                      continue
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(z.read(item))
+          PY
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check server syntax
+        run: node --check server/index.js
+      - name: Build frontend
+        run: npm run build
