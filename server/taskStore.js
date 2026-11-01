@@ -89,16 +89,22 @@ export function openTaskStore(filePath, seedTasks = []) {
     },
     get(id) { return db.prepare(select + " WHERE id=?").get(id); },
     create(task, event) {
-      db.prepare(`INSERT INTO tasks (id,centre_id,parent_user_id,child,level,title,category,status,priority,due_label)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(task.id,task.centreId,task.parentUserId,task.child,task.level,task.title,task.category,task.status,task.priority,task.dueLabel);
-      return this.get(task.id);
+      return transaction(() => {
+        db.prepare(`INSERT INTO tasks (id,centre_id,parent_user_id,child,level,title,category,status,priority,due_label)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`).run(task.id,task.centreId,task.parentUserId,task.child,task.level,task.title,task.category,task.status,task.priority,task.dueLabel);
+        if (event) writeAudit(event);
+        return this.get(task.id);
+      });
     },
     update(id, patch, event) {
       const fields = { child:"child", level:"level", title:"title", category:"category", status:"status", priority:"priority", dueLabel:"due_label" };
       const keys = Object.keys(patch);
       if (!keys.length || keys.some(key => !fields[key])) throw new TypeError("Invalid task patch");
-      db.prepare("UPDATE tasks SET " + keys.map(key => fields[key] + "=?").join(",") + " WHERE id=?").run(...keys.map(key => patch[key]),id);
-      return this.get(id);
+      return transaction(() => {
+        db.prepare("UPDATE tasks SET " + keys.map(key => fields[key] + "=?").join(",") + " WHERE id=?").run(...keys.map(key => patch[key]),id);
+        if (event) writeAudit(event);
+        return this.get(id);
+      });
     },
     listAudit(centreId) {
       return db.prepare(`SELECT id,centre_id AS centreId,time,actor_id AS actorId,
