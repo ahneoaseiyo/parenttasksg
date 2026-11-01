@@ -51,6 +51,25 @@ export function openIdentityStore(filePath) {
         db.exec("COMMIT");
       } catch(error) {db.exec("ROLLBACK");throw error;}
     },
+    bootstrapAdministrator({issuer,subject,userId,centreId},event) {
+      if (![issuer,subject,userId,centreId].every(x=>typeof x==="string" && x.trim().length>0 && x.length<=256) ||
+          !event || !event.id || !event.time || event.actorId!=="local-bootstrap" ||
+          event.actorRole!=="system" || event.centreId!==centreId)
+        throw new Error("Invalid bootstrap request");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const existing=db.prepare("SELECT 1 FROM identity_principals WHERE centre_id=? LIMIT 1").get(centreId);
+        if (existing) throw new Error("Centre already initialized");
+        db.prepare("INSERT INTO identity_principals(user_id,centre_id,role,active) VALUES (?,?,?,1)")
+          .run(userId,centreId,"admin");
+        db.prepare("INSERT INTO identity_subjects(issuer,subject,user_id,centre_id) VALUES (?,?,?,?)")
+          .run(issuer,subject,userId,centreId);
+        db.prepare(`INSERT INTO audit_events(id,centre_id,time,actor_id,actor_role,action,resource_type,resource_id)
+          VALUES (?,?,?,?,?,?,?,?)`).run(event.id,centreId,event.time,event.actorId,event.actorRole,
+          "identity.bootstrap_admin","Identity",userId);
+        db.exec("COMMIT");
+      } catch(error) {db.exec("ROLLBACK");throw error;}
+    },
     deactivate(centreId,userId,event) {
       if (!event || event.actorRole!=="admin" || event.centreId!==centreId) throw new Error("Administrator audit required");
       db.exec("BEGIN IMMEDIATE");
