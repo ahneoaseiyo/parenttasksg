@@ -1,4 +1,5 @@
 import { createOidcVerifier } from "./oidcAuth.js";
+import { validateEntraExternalIdConfiguration } from "./entraConfig.js";
 import { openIdentityStore } from "./identityStore.js";
 import { openRosterStore } from "./rosterStore.js";
 import { openConsentStore } from "./consentStore.js";
@@ -382,6 +383,10 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   if (!app.locals.demoAuthEnabled && !app.locals.verifyAccessToken &&
     process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE && process.env.OIDC_JWKS_URL) {
     if (!identityStore) throw new Error("Persistent identity storage is required for OIDC authentication");
+    if (process.env.OIDC_PROVIDER === "entra-external-id") {
+      validateEntraExternalIdConfiguration({issuer:process.env.OIDC_ISSUER,
+        audience:process.env.OIDC_AUDIENCE,jwksUrl:process.env.OIDC_JWKS_URL});
+    }
     app.locals.verifyAccessToken=createOidcVerifier({
       issuer:process.env.OIDC_ISSUER,audience:process.env.OIDC_AUDIENCE,
       jwksUrl:process.env.OIDC_JWKS_URL,
