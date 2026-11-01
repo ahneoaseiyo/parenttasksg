@@ -1,0 +1,23 @@
+{
+  "name": "parenttask-sg",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "api": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "cors": "latest",
+    "express": "latest",
+    "framer-motion": "latest",
+    "nanoid": "latest",
+    "react-dom": "latest",
+    "react": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {}
+}
