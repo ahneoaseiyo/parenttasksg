@@ -38,7 +38,41 @@ export function openRosterStore(filePath, seedChildren=[], seedLinks=[]) {
       db.exec("COMMIT");
     } catch(error){db.exec("ROLLBACK");db.close();throw error;}
   }
+  const audit=db.prepare(`INSERT INTO audit_events
+    (id,centre_id,time,actor_id,actor_role,action,resource_type,resource_id)
+    VALUES (?,?,?,?,?,?,?,?)`);
+  function mutate(work,event) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result=work();
+      audit.run(event.id,event.centreId,event.time,event.actorId,event.actorRole,
+        event.action,event.resourceType,event.resourceId);
+      db.exec("COMMIT");
+      return result;
+    } catch(error) {db.exec("ROLLBACK");throw error;}
+  }
   return {
+    listChildren(centreId) {
+      return db.prepare("SELECT id,centre_id AS centreId,name FROM roster_children WHERE centre_id=? ORDER BY name").all(centreId);
+    },
+    listLinks(centreId) {
+      return db.prepare(`SELECT centre_id AS centreId,parent_user_id AS parentUserId,child_id AS childId
+        FROM roster_parent_links WHERE centre_id=? ORDER BY parent_user_id,child_id`).all(centreId);
+    },
+    addChild(child,event) {
+      return mutate(()=>db.prepare("INSERT INTO roster_children(id,centre_id,name) VALUES (?,?,?)")
+        .run(child.id,child.centreId,child.name),event);
+    },
+    linkParent(centreId,parentUserId,childId,event) {
+      if(!this.child(centreId,childId)) return {error:"child_not_found"};
+      return mutate(()=>db.prepare(`INSERT INTO roster_parent_links
+        (centre_id,parent_user_id,child_id) VALUES (?,?,?)`).run(centreId,parentUserId,childId),event);
+    },
+    revokeParent(centreId,parentUserId,childId,event) {
+      if(!this.ownsChild(centreId,parentUserId,childId)) return {error:"link_not_found"};
+      return mutate(()=>db.prepare(`DELETE FROM roster_parent_links
+        WHERE centre_id=? AND parent_user_id=? AND child_id=?`).run(centreId,parentUserId,childId),event);
+    },
     child(centreId,childId) {
       return db.prepare("SELECT id,centre_id AS centreId,name FROM roster_children WHERE centre_id=? AND id=?").get(centreId,childId);
     },
