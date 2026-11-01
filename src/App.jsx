@@ -1414,10 +1414,7 @@ function ConsentFormScreen({task, onSign, onBack}){
                 <span style={{fontSize:11,color:"#B45309"}}>我已阅读并同意上述条款。/ Saya telah membaca dan bersetuju dengan syarat-syarat di atas.</span>
               </div>
               <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
-                <div onClick={()=>setAgreed(!agreed)}
-                  style={{width:20,height:20,borderRadius:6,border:`2px solid ${agreed?C.green:C.border}`,background:agreed?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,cursor:"pointer",transition:"all .15s"}}>
-                  {agreed&&<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                </div>
+                <input type="checkbox" checked={agreed} onChange={e=>setAgreed(e.target.checked)} aria-label="I agree to the consent terms" style={{width:20,height:20,accentColor:C.green,flexShrink:0,marginTop:1}}/>
                 <span style={{fontSize:13,color:"#92400E",lineHeight:1.5,fontWeight:600}}>
                   I agree to the terms above and give consent for my child to attend this field trip. *
                 </span>
