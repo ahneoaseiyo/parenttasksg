@@ -34,7 +34,7 @@ export function openIdentityStore(filePath) {
     WHERE s.issuer=? AND s.subject=? AND p.active=1`);
   const parent = db.prepare("SELECT 1 FROM identity_principals WHERE centre_id=? AND user_id=? AND role='parent' AND active=1");
   return {
-    resolve(issuer, subject) { return find.get(issuer, subject) || null; },
+    resolve(issuer, subject) { const row=find.get(issuer, subject); return row ? {userId:row.userId,centreId:row.centreId,role:row.role} : null; },
     isActiveParent(centreId, userId) { return !!parent.get(centreId,userId); },
     provision({issuer,subject,userId,centreId,role},event) {
       if (![issuer,subject,userId,centreId].every(x=>typeof x==="string" && x.length>0 && x.length<=256) ||
