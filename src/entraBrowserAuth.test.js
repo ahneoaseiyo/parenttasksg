@@ -4,7 +4,7 @@ import { webcrypto } from "node:crypto";
 import { beginEntraLogin,consumeEntraCallback,pkceChallenge,validateBrowserAuthConfig,exchangeEntraCode } from "./entraBrowserAuth.js";
 Object.defineProperty(globalThis,"crypto",{value:webcrypto,configurable:true});
 const tenant="11111111-2222-4333-8444-555555555555";
-const config={authority:"https://pilot.ciamlogin.com/"+tenant,clientId:"test-client",
+const config={authority:"https://pilot.ciamlogin.com/"+tenant,clientId:"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
   apiScope:"api://pilot/access",redirectUri:"http://localhost:5173/auth/callback"};
 function store(){const data=new Map();return {setItem:(k,v)=>data.set(k,v),getItem:k=>data.get(k)||null,removeItem:k=>data.delete(k)};}
 test("PKCE challenge matches SHA-256 reference vector",async()=>{
@@ -43,4 +43,24 @@ test("token exchange posts PKCE verifier and refuses malformed responses",async(
   const result=await exchangeEntraCode(tx,{fetchImpl});
   assert.equal(result.accessToken,"synthetic");
   await assert.rejects(()=>exchangeEntraCode(tx,{fetchImpl:async()=>({ok:false})}),/failed/);
+});
+
+test("configuration fails closed on malformed or attacker-controlled endpoints",()=>{
+  for(const changes of [
+    {authority:"https://user:password@pilot.ciamlogin.com/"+tenant},
+    {authority:"https://pilot.ciamlogin.com:8443/"+tenant},
+    {authority:"https://pilot.ciamlogin.com/--------------------0000000000000000"},
+    {clientId:"test-client"},
+    {apiScope:"openid"},
+    {apiScope:"api://pilot/access offline_access"},
+    {redirectUri:"https://app.example/callback?next=https://evil.example"},
+    {redirectUri:"https://user@app.example/callback"},
+    {redirectUri:"not a URL"}
+  ]) assert.throws(()=>validateBrowserAuthConfig({...config,...changes}));
+});
+test("code exchange refuses unvalidated endpoints before making network calls",async()=>{
+  let calls=0;
+  await assert.rejects(()=>exchangeEntraCode({...config,authority:"https://evil.example",code:"code",verifier:"a".repeat(64)},
+    {fetchImpl:async()=>{calls++;throw new Error("should not fetch");}}),/Invalid/);
+  assert.equal(calls,0);
 });
