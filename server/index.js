@@ -518,7 +518,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     const body=req.body;
     if(!body || typeof body!=="object" || Array.isArray(body) ||
       !hasOnlyKnownKeys(body,new Set(["issuer","subject","userId","role"])) ||
-      ![body.issuer,body.subject,body.userId].every(isNonEmptyString) ||
+      ![body.issuer,body.subject,body.userId].every(value => isNonEmptyString(value)) ||
       !["parent","teacher"].includes(body.role))
       return res.status(400).json({error:"Invalid identity"});
     try {
