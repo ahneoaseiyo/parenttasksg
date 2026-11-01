@@ -494,7 +494,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   app.get("/api/consent-requests", requireRoles(ROLE_PARENT,ROLE_TEACHER,ROLE_ADMIN), (req,res) => {
     if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
     const childIds=req.auth.role===ROLE_PARENT
-      ? rosterStore.childrenForParent(req.auth.centreId,req.auth.userId).map(child=>child.id)
+      ? rosterStore?.childrenForParent(req.auth.centreId,req.auth.userId).map(child=>child.id) ?? []
       : null;
     return res.json(consentStore.listRequests(req.auth.centreId,childIds));
   });
