@@ -1,0 +1,40 @@
+name: Extract prototype source once
+on:
+  push:
+    branches: [setup/ai-company-phase1]
+    paths: [.github/workflows/extract-source.yml]
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    if: github.repository == 'ahneoaseiyo/parenttasksg'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Unpack and validate archive paths
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('parenttask-sg-github-upload.zip') as z:
+              for info in z.infolist():
+                  name = info.filename.replace(chr(92), '/')
+                  path = Path(name)
+                  if path.is_absolute() or '..' in path.parts or path.parts[0] == '.github':
+                      raise ValueError('Unsafe archive entry: ' + name)
+                  if info.is_dir():
+                      continue
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(z.read(info))
+          PY
+      - name: Commit extracted source to setup branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .gitignore README.md package.json package-lock.json index.html src server OUTREACH_PACK.md PRODUCTION_READINESS.md
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: unpack prototype source for agent development"
+            git push
+          fi
