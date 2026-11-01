@@ -400,6 +400,19 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     res.json(tasks);
   });
 
+  function taskAuditEvent(req, action, resourceId) {
+    return {
+      id: nanoid(),
+      centreId: req.auth.centreId,
+      time: new Date().toISOString(),
+      actorId: req.auth.userId,
+      actorRole: req.auth.role,
+      action,
+      resourceType: "Task",
+      resourceId,
+    };
+  }
+
   app.post("/api/tasks", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
     const parsed = validateTaskCreatePayload(req.body, req.auth.centreId);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
@@ -516,7 +529,8 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   });
 
   app.get("/api/audit", requireRoles(ROLE_ADMIN), (req, res) => {
-    res.json(state.auditEvents.filter((event) => event.centreId === req.auth.centreId || event.centreId === "system"));
+    if (taskStore) return res.json(taskStore.listAudit(req.auth.centreId));
+    return res.json(state.auditEvents.filter((event) => event.centreId === req.auth.centreId || event.centreId === "system"));
   });
 
   app.get("/api/settings", requireRoles(ROLE_ADMIN), (req, res) => {
