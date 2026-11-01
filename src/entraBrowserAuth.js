@@ -16,12 +16,15 @@ export async function pkceChallenge(verifier) {
   return base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256",encoder.encode(verifier))));
 }
 export function validateBrowserAuthConfig({authority,clientId,apiScope,redirectUri}) {
-  const url=new URL(authority),redirect=new URL(redirectUri);
-  if(url.protocol!=="https:" || !/^[a-z0-9-]+\.ciamlogin\.com$/i.test(url.hostname) ||
-     !/^\/[0-9a-f-]{36}\/?$/i.test(url.pathname) || url.search || url.hash ||
-     !clientId || !apiScope || /^(openid|profile|email|offline_access)$/i.test(apiScope) ||
+  if([authority,clientId,apiScope,redirectUri].some(v=>typeof v!=="string" || !v.trim()))throw new Error("Missing browser OIDC configuration");
+  let url,redirect;
+  try {url=new URL(authority);redirect=new URL(redirectUri);}
+  catch {throw new Error("Invalid browser OIDC URL");}
+  if(url.protocol!=="https:" || url.username || url.password || url.port || !/^[a-z0-9-]+\.ciamlogin\.com$/i.test(url.hostname) ||
+     !/^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname) || url.search || url.hash ||
+     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId) ||\n     !/^[^\\s?#]+\\/[^\\s?#]+$/.test(apiScope) ||
      (redirect.protocol!=="https:" && !(redirect.protocol==="http:" && ["localhost","127.0.0.1"].includes(redirect.hostname))) ||
-     redirect.username || redirect.password || redirect.hash)
+     redirect.username || redirect.password || redirect.hash || redirect.search ||\n     (redirect.protocol==="https:" && !redirect.hostname))
     throw new Error("Invalid browser OIDC configuration");
   return {authority:url.origin+url.pathname.replace(/\/$/,""),clientId,apiScope,redirectUri};
 }
@@ -45,13 +48,13 @@ export function consumeEntraCallback({search,sessionStorage,now=Date.now()}) {
   const tx=JSON.parse(saved),params=new URLSearchParams(search);
   if(!tx.createdAt || now-tx.createdAt>300000 || now<tx.createdAt ||
      params.getAll("state").length!==1 || params.get("state")!==tx.state ||
-     params.has("error") || params.getAll("code").length!==1 || !params.get("code"))
+     params.has("error") || params.getAll("code").length!==1 || !params.get("code") ||\n     !/^[a-zA-Z0-9._~-]{43,128}$/.test(tx.verifier) || !tx.authority || !tx.redirectUri)
     throw new Error("Login callback rejected");
   return {code:params.get("code"),verifier:tx.verifier,nonce:tx.nonce,
     redirectUri:tx.redirectUri,authority:tx.authority,clientId:tx.clientId,apiScope:tx.apiScope};
 }
 export async function exchangeEntraCode(tx,{fetchImpl=fetch}={}) {
-  const endpoint=tx.authority+"/oauth2/v2.0/token";
+  const {authority,clientId,apiScope,redirectUri}=validateBrowserAuthConfig(tx);\n  if(typeof tx.code!=="string" || !tx.code || !/^[a-zA-Z0-9._~-]{43,128}$/.test(tx.verifier))throw new Error("Invalid code exchange transaction");\n  const endpoint=authority+"/oauth2/v2.0/token";
   const response=await fetchImpl(endpoint,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
     body:new URLSearchParams({grant_type:"authorization_code",client_id:tx.clientId,
       code:tx.code,redirect_uri:tx.redirectUri,code_verifier:tx.verifier,scope:"openid profile "+tx.apiScope})});
