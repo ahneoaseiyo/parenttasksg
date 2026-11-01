@@ -220,3 +220,35 @@ test("consent requires stable child ID and rejects name-only input", async () =>
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+
+test("AI extraction rejects parents and oversized messages", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const post = (token, message) => fetch(`${baseUrl}/api/ai/extract`, {
+      method: "POST", headers: { "content-type": "application/json", ...authHeader(token) },
+      body: JSON.stringify({ message }),
+    });
+    assert.equal((await post(AUTH_TOKENS.parentMeiLingCentreA, "Bring water")).status, 403);
+    assert.equal((await post(AUTH_TOKENS.teacherCentreA, "a".repeat(4001))).status, 400);
+    const allowed = await post(AUTH_TOKENS.teacherCentreA, "Bring water");
+    assert.equal(allowed.status, 200);
+    assert.equal((await allowed.json()).requiresApproval, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("AI extraction rate limit is enforced per user", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const post = () => fetch(`${baseUrl}/api/ai/extract`, {
+      method: "POST", headers: { "content-type": "application/json", ...authHeader(AUTH_TOKENS.teacherCentreA) },
+      body: JSON.stringify({ message: "Bring water" }),
+    });
+    for (let i = 0; i < 10; i++) assert.equal((await post()).status, 200);
+    assert.equal((await post()).status, 429);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
