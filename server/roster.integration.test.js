@@ -18,6 +18,7 @@ test("roster persists centre-specific child links after restart",()=>{
     assert.equal(roster.ownsChild("centre_a","parent_2","child_1"),false);
     assert.equal(roster.ownsChild("centre_b","parent_1","child_1"),false);
     roster.close();
+    roster=null;
     roster=openRosterStore(path,[],[]);
     assert.equal(roster.childrenForParent("centre_a","parent_1")[0].name,"Child A");
     assert.deepEqual(roster.childrenForParent("centre_b","parent_1"),[]);
