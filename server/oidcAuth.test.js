@@ -37,3 +37,25 @@ test("OIDC verifier validates signature, audience, expiry and server-owned roles
     assert.equal(denied.status,403);
   } finally {await new Promise(resolve=>server.close(resolve));app.locals.closeTaskStore();}
 });
+
+test("OIDC checks live identity registry on every token verification",async()=>{
+  const {publicKey,privateKey}=generateKeyPairSync("rsa",{modulusLength:2048});
+  const jwk=publicKey.export({format:"jwk"});
+  let active=true;
+  const verifier=createOidcVerifier({
+    issuer:"https://identity.example",audience:"parenttask-api",
+    jwksUrl:"https://identity.example/jwks",
+    identities:[{sub:"person",userId:"untrusted",role:"admin",centreId:"wrong"}],
+    resolveIdentity:(issuer,subject)=>active && issuer==="https://identity.example" && subject==="person"
+      ? {userId:"real-parent",role:"parent",centreId:"centre_a"} : null,
+    fetchKeys:async()=>({ok:true,json:async()=>({keys:[{...jwk,kid:"kid",alg:"RS256"}]})})
+  });
+  const header=Buffer.from(JSON.stringify({alg:"RS256",kid:"kid"})).toString("base64url");
+  const claims=Buffer.from(JSON.stringify({iss:"https://identity.example",aud:"parenttask-api",
+    sub:"person",role:"admin",iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+600})).toString("base64url");
+  const data=header+"."+claims;
+  const token=data+"."+sign("RSA-SHA256",Buffer.from(data),privateKey).toString("base64url");
+  assert.deepEqual(await verifier(token),{userId:"real-parent",role:"parent",centreId:"centre_a"});
+  active=false;
+  await assert.rejects(verifier(token),/Identity not provisioned/);
+});

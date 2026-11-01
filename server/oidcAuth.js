@@ -6,8 +6,9 @@ function decode(value) {
 
 // External OIDC provider must issue RS256 access tokens for this API audience.
 // Identity-to-role mapping is server-controlled; token claims cannot assign roles.
-export function createOidcVerifier({issuer,audience,jwksUrl,identities,fetchKeys=fetch}) {
+export function createOidcVerifier({issuer,audience,jwksUrl,identities=[],resolveIdentity,fetchKeys=fetch}) {
   if(!issuer || !audience || !jwksUrl || !Array.isArray(identities) ||
+    (resolveIdentity !== undefined && typeof resolveIdentity !== 'function') ||
     !jwksUrl.startsWith("https://")) throw new Error("OIDC configuration incomplete");
   const principals=new Map();
   for(const identity of identities) {
@@ -46,7 +47,7 @@ export function createOidcVerifier({issuer,audience,jwksUrl,identities,fetchKeys
     if(!key || !verify("RSA-SHA256",Buffer.from(parts[0]+"."+parts[1]),
       createPublicKey({key,format:"jwk"}),Buffer.from(parts[2],"base64url")))
       throw new Error("Invalid token signature");
-    const principal=principals.get(claims.sub);
+    const principal=resolveIdentity ? await resolveIdentity(issuer,claims.sub) : principals.get(claims.sub);
     if(!principal)throw new Error("Identity not provisioned");
     return principal;
   };
