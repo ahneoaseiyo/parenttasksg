@@ -490,11 +490,25 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
     res.status(201).json(submission);
   });
 
-  app.post("/api/ai/extract", (req, res) => {
-    const centreSettings = state.settingsByCentre[req.auth.centreId] || state.settingsByCentre.centre_a;
-    const result = demoExtract(req.body?.message || "", centreSettings);
+  const extractionUsage = new Map();
+  app.post("/api/ai/extract", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
+    const message = req.body?.message;
+    if (typeof message !== "string" || !message.trim() || message.length > 4000) {
+      return res.status(400).json({ error: "Message must be 1–4000 characters" });
+    }
+    const now = Date.now();
+    const key = `${req.auth.centreId}:${req.auth.userId}`;
+    const usage = extractionUsage.get(key);
+    if (usage && now - usage.start < 60_000 && usage.count >= 10) {
+      return res.status(429).json({ error: "AI extraction rate limit exceeded" });
+    }
+    extractionUsage.set(key, !usage || now - usage.start >= 60_000
+      ? { start: now, count: 1 }
+      : { start: usage.start, count: usage.count + 1 });
+    const centreSettings = state.settingsByCentre[req.auth.centreId];
+    const result = demoExtract(message, centreSettings);
     audit(state, "AI Service", `Generated ${result.tasks.length} extraction draft(s)`, req.auth.centreId, "AI", "Medium");
-    res.json(result);
+    return res.json({ ...result, requiresApproval: true });
   });
 
   app.get("/api/audit", requireRoles(ROLE_ADMIN), (req, res) => {
