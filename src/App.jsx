@@ -1147,7 +1147,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
 
   const pending=tasks.filter(t=>t.status!=="Done");
   const urgent=pending.filter(t=>t.priority==="High");
-  const tomorrow=pending.filter(t=>t.dueLabel==="Tomorrow");
+  const tomorrow=pending.filter(t=>t.dueLabel==="Tomorrow"&&(selectedChild==="all"||t.child===selectedChild));
   const done=tasks.filter(t=>t.status==="Done");
 
   const filterMap={all:tasks,pending,urgent,done};
