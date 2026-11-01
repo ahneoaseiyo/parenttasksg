@@ -38,5 +38,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Check server syntax
         run: node --check server/index.js
+      - name: Run tests
+        run: npm test
       - name: Build frontend
         run: npm run build

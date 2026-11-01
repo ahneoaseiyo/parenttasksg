@@ -14,6 +14,10 @@ const allowedOrigins = (process.env.CORS_ORIGINS || "")
 const ROLE_PARENT = "parent";
 const ROLE_TEACHER = "teacher";
 const ROLE_ADMIN = "admin";
+const NODE_ENV = process.env.NODE_ENV || "development";
+const DEMO_TOKEN_AUTH_ENABLED = NODE_ENV !== "production";
+const MAX_SHORT_TEXT_LENGTH = 120;
+const MAX_NOTE_LENGTH = 500;
 
 export const AUTH_TOKENS = {
   parentMeiLingCentreA: "token_parent_mei_ling_centre_a",
@@ -30,6 +34,15 @@ const principalsByToken = new Map([
   [AUTH_TOKENS.adminCentreA, { userId: "admin_siti", role: ROLE_ADMIN, centreId: "centre_a" }],
   [AUTH_TOKENS.teacherCentreB, { userId: "teacher_bala", role: ROLE_TEACHER, centreId: "centre_b" }],
 ]);
+
+const parentPrincipalsByCentre = new Map();
+for (const principal of principalsByToken.values()) {
+  if (principal.role !== ROLE_PARENT) continue;
+  if (!parentPrincipalsByCentre.has(principal.centreId)) {
+    parentPrincipalsByCentre.set(principal.centreId, new Set());
+  }
+  parentPrincipalsByCentre.get(principal.centreId).add(principal.userId);
+}
 
 function buildInitialState() {
   return {
@@ -158,6 +171,9 @@ function demoExtract(message, settings) {
 }
 
 function authenticate(req, res, next) {
+  if (!DEMO_TOKEN_AUTH_ENABLED) {
+    return res.status(503).json({ error: "Demo token authentication is disabled in production" });
+  }
   const authHeader = req.header("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Authentication required" });
@@ -196,16 +212,156 @@ function denyIfNotResourceOwner(req, res, resource) {
   return false;
 }
 
-function filterTaskPatch(reqBody, role) {
-  const safePatch = { ...reqBody };
-  delete safePatch.id;
-  delete safePatch.centreId;
+function hasOnlyKnownKeys(value, allowedKeys) {
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+}
 
-  if (role === ROLE_PARENT) {
-    return Object.fromEntries(Object.entries(safePatch).filter(([key]) => key === "status"));
+function isNonEmptyString(value, maxLength = MAX_SHORT_TEXT_LENGTH) {
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= maxLength;
+}
+
+function normalizeShortText(value, maxLength = MAX_SHORT_TEXT_LENGTH) {
+  return typeof value === "string" ? value.trim() : value;
+}
+
+function normalizeOptionalShortText(value, maxLength = MAX_SHORT_TEXT_LENGTH) {
+  if (value === undefined) return undefined;
+  return normalizeShortText(value, maxLength);
+}
+
+function normalizeOptionalNote(value) {
+  if (value === undefined) return undefined;
+  return normalizeShortText(value, MAX_NOTE_LENGTH);
+}
+
+function validateTaskCreatePayload(rawPayload, centreId) {
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const allowedKeys = new Set(["parentUserId", "child", "level", "title", "category", "dueLabel", "priority"]);
+  if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected task fields" };
+
+  const task = {
+    parentUserId: normalizeShortText(payload.parentUserId),
+    child: normalizeShortText(payload.child),
+    level: normalizeShortText(payload.level),
+    title: normalizeShortText(payload.title),
+    category: normalizeShortText(payload.category),
+    dueLabel: normalizeShortText(payload.dueLabel),
+    priority: normalizeShortText(payload.priority),
+  };
+
+  if (
+    !isNonEmptyString(task.parentUserId) ||
+    !isNonEmptyString(task.child) ||
+    !isNonEmptyString(task.level) ||
+    !isNonEmptyString(task.title) ||
+    !isNonEmptyString(task.category) ||
+    !isNonEmptyString(task.dueLabel) ||
+    !isNonEmptyString(task.priority)
+  ) {
+    return { error: "Invalid task payload" };
   }
 
-  return safePatch;
+  const parentUsers = parentPrincipalsByCentre.get(centreId);
+  if (!parentUsers || !parentUsers.has(task.parentUserId)) {
+    return { error: "Unknown parent for centre" };
+  }
+
+  return { value: task };
+}
+
+function validateTaskPatchPayload(rawPayload, role) {
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const parentAllowedKeys = new Set(["status"]);
+  const staffAllowedKeys = new Set(["child", "level", "title", "category", "status", "priority", "dueLabel"]);
+  const allowedKeys = role === ROLE_PARENT ? parentAllowedKeys : staffAllowedKeys;
+
+  if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected task fields" };
+  if (Object.keys(payload).length === 0) return { error: "No task fields provided" };
+
+  const patch = {};
+  for (const [key, value] of Object.entries(payload)) {
+    const normalized = normalizeShortText(value);
+    if (!isNonEmptyString(normalized)) return { error: "Invalid task payload" };
+    patch[key] = normalized;
+  }
+  return { value: patch };
+}
+
+function validateBroadcastCreatePayload(rawPayload) {
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const allowedKeys = new Set(["title", "category", "dueLabel"]);
+  if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected broadcast fields" };
+
+  const broadcast = {
+    title: normalizeShortText(payload.title),
+    category: normalizeShortText(payload.category),
+    dueLabel: normalizeShortText(payload.dueLabel),
+  };
+  if (!isNonEmptyString(broadcast.title) || !isNonEmptyString(broadcast.category) || !isNonEmptyString(broadcast.dueLabel)) {
+    return { error: "Invalid broadcast payload" };
+  }
+  return { value: broadcast };
+}
+
+function validateConsentPayload(rawPayload) {
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const allowedKeys = new Set(["child", "decision", "notes"]);
+  if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected consent fields" };
+
+  const child = normalizeShortText(payload.child);
+  if (!isNonEmptyString(child)) return { error: "Consent child is required" };
+
+  const decision = normalizeOptionalShortText(payload.decision);
+  if (decision !== undefined && !isNonEmptyString(decision)) return { error: "Invalid consent payload" };
+
+  const notes = normalizeOptionalNote(payload.notes);
+  if (notes !== undefined && !isNonEmptyString(notes, MAX_NOTE_LENGTH)) return { error: "Invalid consent payload" };
+
+  return { value: { child, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
+}
+
+function parentOwnsChild(state, centreId, parentUserId, child) {
+  return state.tasks.some(
+    (task) => task.centreId === centreId && task.parentUserId === parentUserId && task.child === child,
+  );
+}
+
+function validateSettingsPatchPayload(rawPayload) {
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const allowedKeys = new Set(["retentionMonths", "aiApprovalRequired", "notificationChannels", "sensitiveFieldMasking"]);
+  if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected settings fields" };
+  if (Object.keys(payload).length === 0) return { error: "No settings fields provided" };
+
+  const patch = {};
+  if (Object.hasOwn(payload, "retentionMonths")) {
+    if (!Number.isInteger(payload.retentionMonths) || payload.retentionMonths < 1 || payload.retentionMonths > 120) {
+      return { error: "Invalid retentionMonths" };
+    }
+    patch.retentionMonths = payload.retentionMonths;
+  }
+  if (Object.hasOwn(payload, "aiApprovalRequired")) {
+    if (typeof payload.aiApprovalRequired !== "boolean") return { error: "Invalid aiApprovalRequired" };
+    patch.aiApprovalRequired = payload.aiApprovalRequired;
+  }
+  if (Object.hasOwn(payload, "sensitiveFieldMasking")) {
+    if (typeof payload.sensitiveFieldMasking !== "boolean") return { error: "Invalid sensitiveFieldMasking" };
+    patch.sensitiveFieldMasking = payload.sensitiveFieldMasking;
+  }
+  if (Object.hasOwn(payload, "notificationChannels")) {
+    const channels = payload.notificationChannels;
+    const allowedChannelKeys = new Set(["push", "email", "sms", "whatsapp"]);
+    if (!channels || typeof channels !== "object" || Array.isArray(channels) || !hasOnlyKnownKeys(channels, allowedChannelKeys)) {
+      return { error: "Invalid notificationChannels" };
+    }
+    const channelPatch = {};
+    for (const [key, value] of Object.entries(channels)) {
+      if (typeof value !== "boolean") return { error: "Invalid notificationChannels" };
+      channelPatch[key] = value;
+    }
+    patch.notificationChannels = channelPatch;
+  }
+
+  return { value: patch };
 }
 
 export function createApp() {
@@ -240,10 +396,9 @@ export function createApp() {
   });
 
   app.post("/api/tasks", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
-    const payload = { ...req.body };
-    delete payload.id;
-    delete payload.centreId;
-    const task = { id: nanoid(), status: "Not done", centreId: req.auth.centreId, ...payload };
+    const parsed = validateTaskCreatePayload(req.body, req.auth.centreId);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const task = { id: nanoid(), status: "Not done", centreId: req.auth.centreId, ...parsed.value };
     state.tasks.unshift(task);
     audit(state, "Teacher", `Created task: ${task.title}`, req.auth.centreId, "Task");
     res.status(201).json(task);
@@ -255,7 +410,9 @@ export function createApp() {
     if (denyIfNotInCentre(req, res, task)) return undefined;
     if (denyIfNotResourceOwner(req, res, task)) return undefined;
 
-    Object.assign(task, filterTaskPatch(req.body || {}, req.auth.role));
+    const parsed = validateTaskPatchPayload(req.body, req.auth.role);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    Object.assign(task, parsed.value);
     audit(state, "User", `Updated task: ${task.title}`, req.auth.centreId, "Task");
     return res.json(task);
   });
@@ -266,10 +423,9 @@ export function createApp() {
   });
 
   app.post("/api/broadcasts", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
-    const payload = { ...req.body };
-    delete payload.id;
-    delete payload.centreId;
-    const broadcast = { id: nanoid(), centreId: req.auth.centreId, sentTo: 0, done: 0, pending: 0, ...payload };
+    const parsed = validateBroadcastCreatePayload(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const broadcast = { id: nanoid(), centreId: req.auth.centreId, sentTo: 0, done: 0, pending: 0, ...parsed.value };
     state.broadcasts.unshift(broadcast);
     audit(state, "Teacher", `Sent broadcast: ${broadcast.title}`, req.auth.centreId, "Broadcast");
     res.status(201).json(broadcast);
@@ -312,17 +468,18 @@ export function createApp() {
   });
 
   app.post("/api/consents", requireRoles(ROLE_PARENT), (req, res) => {
-    const payload = { ...req.body };
-    delete payload.id;
-    delete payload.centreId;
-    delete payload.parentUserId;
+    const parsed = validateConsentPayload(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    if (!parentOwnsChild(state, req.auth.centreId, req.auth.userId, parsed.value.child)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const submission = {
       id: nanoid(),
       submittedAt: new Date().toISOString(),
       centreId: req.auth.centreId,
       parentUserId: req.auth.userId,
-      ...payload,
+      ...parsed.value,
     };
     state.consentSubmissions.unshift(submission);
     audit(state, "Parent", `Submitted consent for ${submission.child || "child"}`, req.auth.centreId, "Consent");
@@ -349,7 +506,13 @@ export function createApp() {
   app.patch("/api/settings", requireRoles(ROLE_ADMIN), (req, res) => {
     const settings = state.settingsByCentre[req.auth.centreId];
     if (!settings) return res.status(404).json({ error: "Settings not found" });
-    Object.assign(settings, req.body || {});
+    const parsed = validateSettingsPatchPayload(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    if (parsed.value.notificationChannels) {
+      settings.notificationChannels = { ...settings.notificationChannels, ...parsed.value.notificationChannels };
+      delete parsed.value.notificationChannels;
+    }
+    Object.assign(settings, parsed.value);
     audit(state, "Centre Admin", "Updated centre policy settings", req.auth.centreId, "Admin", "Medium");
     return res.json(settings);
   });

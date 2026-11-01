@@ -108,9 +108,86 @@ test("consent submission cannot spoof another parent", async () => {
       body: JSON.stringify({ child: "Arielle", parentUserId: "parent_hafiz" }),
     });
 
-    assert.equal(response.status, 201);
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("consent submission is denied for unrelated child", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const response = await fetch(`${baseUrl}/api/consents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeader(AUTH_TOKENS.parentHafizCentreA),
+      },
+      body: JSON.stringify({ child: "Arielle" }),
+    });
+
+    assert.equal(response.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("task patch rejects unauthorized field modification", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const response = await fetch(`${baseUrl}/api/tasks/task_1`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...authHeader(AUTH_TOKENS.teacherCentreA),
+      },
+      body: JSON.stringify({ parentUserId: "parent_hafiz" }),
+    });
+
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("settings patch rejects malformed values", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const response = await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...authHeader(AUTH_TOKENS.adminCentreA),
+      },
+      body: JSON.stringify({ retentionMonths: "24", unknownField: true }),
+    });
+
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("cross-centre consent records are isolated", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const submitResponse = await fetch(`${baseUrl}/api/consents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeader(AUTH_TOKENS.parentMeiLingCentreA),
+      },
+      body: JSON.stringify({ child: "Arielle", decision: "agree" }),
+    });
+    assert.equal(submitResponse.status, 201);
+
+    const response = await fetch(`${baseUrl}/api/consents`, {
+      headers: authHeader(AUTH_TOKENS.teacherCentreB),
+    });
+
+    assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.parentUserId, "parent_mei_ling");
+    assert.deepEqual(payload, []);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
