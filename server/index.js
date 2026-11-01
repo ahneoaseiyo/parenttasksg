@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { pathToFileURL } from "node:url";
 
 const port = Number(process.env.PORT || 8787);
-const host = process.env.HOST || "0.0.0.0";
+const host = process.env.HOST || "127.0.0.1";
 const defaultAllowedOrigins = ["http://127.0.0.1:5173", "http://localhost:5173"];
 const allowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
@@ -15,7 +15,7 @@ const ROLE_PARENT = "parent";
 const ROLE_TEACHER = "teacher";
 const ROLE_ADMIN = "admin";
 const NODE_ENV = process.env.NODE_ENV || "development";
-const DEMO_TOKEN_AUTH_ENABLED = NODE_ENV !== "production";
+const DEMO_TOKEN_AUTH_ENABLED = NODE_ENV !== "production" && process.env.ENABLE_DEMO_AUTH === "true";
 const MAX_SHORT_TEXT_LENGTH = 120;
 const MAX_NOTE_LENGTH = 500;
 
@@ -171,7 +171,7 @@ function demoExtract(message, settings) {
 }
 
 function authenticate(req, res, next) {
-  if (!DEMO_TOKEN_AUTH_ENABLED) {
+  if (!req.app.locals.demoAuthEnabled) {
     return res.status(503).json({ error: "Demo token authentication is disabled in production" });
   }
   const authHeader = req.header("authorization") || "";
@@ -364,8 +364,9 @@ function validateSettingsPatchPayload(rawPayload) {
   return { value: patch };
 }
 
-export function createApp() {
+export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
   const app = express();
+  app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
   const state = buildInitialState();
 
   app.use(
