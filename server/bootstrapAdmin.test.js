@@ -21,7 +21,9 @@ test("offline bootstrap is one-time, issuer-bound and audit-backed",()=>{
         {userId:"admin-1",centreId:"centre_a",role:"admin"});
       assert.throws(()=>bootstrapAdministrator({...input,subject:"other"}),/Centre already initialized/);
       assert.equal(identity.resolve(input.issuer,"other"),null);
-      const events=openTaskStore(dbPath,[]).listAudit("centre_a");
+      const auditStore=openTaskStore(dbPath,[]);
+      const events=auditStore.listAudit("centre_a");
+      auditStore.close();
       assert.ok(events.some(x=>x.action==="identity.bootstrap_admin"));
     } finally {identity.close();}
   } finally {rmSync(dir,{recursive:true,force:true});}
