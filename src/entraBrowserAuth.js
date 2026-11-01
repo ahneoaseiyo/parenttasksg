@@ -57,7 +57,9 @@ export function consumeEntraCallback({search,sessionStorage,now=Date.now()}) {
     redirectUri:tx.redirectUri,authority:tx.authority,clientId:tx.clientId,apiScope:tx.apiScope};
 }
 export async function exchangeEntraCode(tx,{fetchImpl=fetch}={}) {
-  const {authority,clientId,apiScope,redirectUri}=validateBrowserAuthConfig(tx);\n  if(typeof tx.code!=="string" || !tx.code || !/^[a-zA-Z0-9._~-]{43,128}$/.test(tx.verifier))throw new Error("Invalid code exchange transaction");\n  const endpoint=authority+"/oauth2/v2.0/token";
+  const {authority,clientId,apiScope,redirectUri}=validateBrowserAuthConfig(tx);
+  if(typeof tx.code!=="string" || !tx.code || !/^[a-zA-Z0-9._~-]{43,128}$/.test(tx.verifier))throw new Error("Invalid code exchange transaction");
+  const endpoint=authority+"/oauth2/v2.0/token";
   const response=await fetchImpl(endpoint,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
     body:new URLSearchParams({grant_type:"authorization_code",client_id:tx.clientId,
       code:tx.code,redirect_uri:tx.redirectUri,code_verifier:tx.verifier,scope:"openid profile "+tx.apiScope})});
