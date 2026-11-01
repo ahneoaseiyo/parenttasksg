@@ -583,12 +583,6 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       }
     } else {
       return res.status(503).json({error:"Consent request storage unavailable"});
-      if (state.consentSubmissions.some((entry) => entry.centreId === submission.centreId &&
-        entry.childId === submission.childId && entry.consentRequestId === submission.consentRequestId)) {
-        return res.status(409).json({ error: "Consent already submitted for this child and request" });
-      }
-      state.consentSubmissions.unshift(submission);
-      audit(state, "Parent", `Submitted consent for ${submission.child || "child"}`, req.auth.centreId, "Consent");
     }
     return res.status(201).json(submission);
   });
