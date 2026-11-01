@@ -123,7 +123,7 @@ test("consent submission is denied for unrelated child", async () => {
         "content-type": "application/json",
         ...authHeader(AUTH_TOKENS.parentHafizCentreA),
       },
-      body: JSON.stringify({ childId: "child_arielle_a" }),
+      body: JSON.stringify({ childId: "child_arielle_a", consentRequestId: "fake_request" }),
     });
 
     assert.equal(response.status, 403);
@@ -168,7 +168,7 @@ test("settings patch rejects malformed values", async () => {
   }
 });
 
-test("cross-centre consent records are isolated", async () => {
+test("consent submissions require persistent published requests", async () => {
   const { server, baseUrl } = await startServer();
   try {
     const submitResponse = await fetch(`${baseUrl}/api/consents`, {
@@ -179,7 +179,7 @@ test("cross-centre consent records are isolated", async () => {
       },
       body: JSON.stringify({ childId: "child_arielle_a", decision: "agree" }),
     });
-    assert.equal(submitResponse.status, 201);
+    assert.equal(submitResponse.status, 400);
 
     const response = await fetch(`${baseUrl}/api/consents`, {
       headers: authHeader(AUTH_TOKENS.teacherCentreB),

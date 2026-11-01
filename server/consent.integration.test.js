@@ -25,16 +25,28 @@ test("consent is persistent, unique, parent-owned, centre-scoped and audited",as
   try {
     const path=join(dir,"data.sqlite");
     app=await start(path);
-    const payload={childId:"child_arielle_a",consentRequestId:"trip_2026_01",decision:"agree"};
+    const created=await call(app,AUTH_TOKENS.teacherCentreA,"POST","/api/consent-requests",{
+      title:"School trip",terms:"I authorize participation in the school trip.",
+      expiresAt:new Date(Date.now()+86400000).toISOString(),childIds:["child_arielle_a"]});
+    assert.equal(created.status,201);
+    const requestId=created.data.id;
+    assert.equal((await call(app,AUTH_TOKENS.parentMeiLingCentreA,"POST","/api/consents",
+      {childId:"child_arielle_a",consentRequestId:requestId,decision:"agree"})).status,409);
+    assert.equal((await call(app,AUTH_TOKENS.teacherCentreA,"POST",
+      "/api/consent-requests/"+requestId+"/publish")).status,200);
+    const payload={childId:"child_arielle_a",consentRequestId:requestId,decision:"agree"};
     const submit=await call(app,AUTH_TOKENS.parentMeiLingCentreA,"POST","/api/consents",payload);
     assert.equal(submit.status,201);
     assert.equal(submit.data.parentUserId,"parent_mei_ling");
+    assert.equal(submit.data.termsSnapshot,"I authorize participation in the school trip.");
     assert.equal((await call(app,AUTH_TOKENS.parentMeiLingCentreA,"POST","/api/consents",payload)).status,409);
     assert.equal((await call(app,AUTH_TOKENS.parentHafizCentreA,"POST","/api/consents",payload)).status,403);
     assert.deepEqual((await call(app,AUTH_TOKENS.teacherCentreB,"GET","/api/consents")).data,[]);
     assert.deepEqual((await call(app,AUTH_TOKENS.parentHafizCentreA,"GET","/api/consents")).data,[]);
     const audit=(await call(app,AUTH_TOKENS.adminCentreA,"GET","/api/audit")).data;
     assert.ok(audit.some(e=>e.action==="consent.submitted"&&e.resourceId===submit.data.id&&e.actorId==="parent_mei_ling"));
+    assert.equal((await call(app,AUTH_TOKENS.teacherCentreA,"POST",
+      "/api/consent-requests/"+requestId+"/withdraw")).status,200);
     await app.close();app=null;
     app=await start(path);
     const saved=await call(app,AUTH_TOKENS.parentMeiLingCentreA,"GET","/api/consents");
