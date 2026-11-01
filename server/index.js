@@ -595,7 +595,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       ? consentStore.list(req.auth.centreId, req.auth.role === ROLE_PARENT ? req.auth.userId : null)
       : state.consentSubmissions).filter((submission) => {
       if (submission.centreId !== req.auth.centreId) return false;
-      if (req.auth.role === ROLE_PARENT) return submission.parentUserId === req.auth.userId;
+      if (req.auth.role === ROLE_PARENT) return submission.parentUserId === req.auth.userId && !!rosterStore?.ownsChild(req.auth.centreId,req.auth.userId,submission.childId);
       return true;
     });
     res.json(submissions);
