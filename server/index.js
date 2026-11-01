@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { pathToFileURL } from "node:url";
 
 const port = Number(process.env.PORT || 8787);
-const host = process.env.HOST || "0.0.0.0";
+const host = process.env.HOST || "127.0.0.1";
 const defaultAllowedOrigins = ["http://127.0.0.1:5173", "http://localhost:5173"];
 const allowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
@@ -15,7 +15,7 @@ const ROLE_PARENT = "parent";
 const ROLE_TEACHER = "teacher";
 const ROLE_ADMIN = "admin";
 const NODE_ENV = process.env.NODE_ENV || "development";
-const DEMO_TOKEN_AUTH_ENABLED = NODE_ENV !== "production";
+const DEMO_TOKEN_AUTH_ENABLED = NODE_ENV !== "production" && process.env.ENABLE_DEMO_AUTH === "true";
 const MAX_SHORT_TEXT_LENGTH = 120;
 const MAX_NOTE_LENGTH = 500;
 
@@ -105,6 +105,8 @@ function buildInitialState() {
         ],
       },
     ],
+    children: [{ id: "child_arielle_a", centreId: "centre_a", name: "Arielle" }],
+    parentChildLinks: [{ centreId: "centre_a", parentUserId: "parent_mei_ling", childId: "child_arielle_a" }],
     consentSubmissions: [],
     auditEvents: [
       {
@@ -171,7 +173,7 @@ function demoExtract(message, settings) {
 }
 
 function authenticate(req, res, next) {
-  if (!DEMO_TOKEN_AUTH_ENABLED) {
+  if (!req.app.locals.demoAuthEnabled) {
     return res.status(503).json({ error: "Demo token authentication is disabled in production" });
   }
   const authHeader = req.header("authorization") || "";
@@ -305,11 +307,11 @@ function validateBroadcastCreatePayload(rawPayload) {
 
 function validateConsentPayload(rawPayload) {
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
-  const allowedKeys = new Set(["child", "decision", "notes"]);
+  const allowedKeys = new Set(["childId", "decision", "notes"]);
   if (!hasOnlyKnownKeys(payload, allowedKeys)) return { error: "Unexpected consent fields" };
 
-  const child = normalizeShortText(payload.child);
-  if (!isNonEmptyString(child)) return { error: "Consent child is required" };
+  const childId = normalizeShortText(payload.childId);
+  if (!isNonEmptyString(childId)) return { error: "Consent childId is required" };
 
   const decision = normalizeOptionalShortText(payload.decision);
   if (decision !== undefined && !isNonEmptyString(decision)) return { error: "Invalid consent payload" };
@@ -317,13 +319,12 @@ function validateConsentPayload(rawPayload) {
   const notes = normalizeOptionalNote(payload.notes);
   if (notes !== undefined && !isNonEmptyString(notes, MAX_NOTE_LENGTH)) return { error: "Invalid consent payload" };
 
-  return { value: { child, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
+  return { value: { childId, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
 }
 
-function parentOwnsChild(state, centreId, parentUserId, child) {
-  return state.tasks.some(
-    (task) => task.centreId === centreId && task.parentUserId === parentUserId && task.child === child,
-  );
+function parentOwnsChild(state, centreId, parentUserId, childId) {
+  return state.children.some((child) => child.id === childId && child.centreId === centreId) &&
+    state.parentChildLinks.some((link) => link.centreId === centreId && link.parentUserId === parentUserId && link.childId === childId);
 }
 
 function validateSettingsPatchPayload(rawPayload) {
@@ -364,8 +365,9 @@ function validateSettingsPatchPayload(rawPayload) {
   return { value: patch };
 }
 
-export function createApp() {
+export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED } = {}) {
   const app = express();
+  app.locals.demoAuthEnabled = NODE_ENV !== "production" && enableDemoAuth === true;
   const state = buildInitialState();
 
   app.use(
@@ -470,15 +472,17 @@ export function createApp() {
   app.post("/api/consents", requireRoles(ROLE_PARENT), (req, res) => {
     const parsed = validateConsentPayload(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    if (!parentOwnsChild(state, req.auth.centreId, req.auth.userId, parsed.value.child)) {
+    if (!parentOwnsChild(state, req.auth.centreId, req.auth.userId, parsed.value.childId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    const child = state.children.find((entry) => entry.id === parsed.value.childId && entry.centreId === req.auth.centreId);
     const submission = {
       id: nanoid(),
       submittedAt: new Date().toISOString(),
       centreId: req.auth.centreId,
       parentUserId: req.auth.userId,
+      child: child.name,
       ...parsed.value,
     };
     state.consentSubmissions.unshift(submission);
@@ -486,11 +490,25 @@ export function createApp() {
     res.status(201).json(submission);
   });
 
-  app.post("/api/ai/extract", (req, res) => {
-    const centreSettings = state.settingsByCentre[req.auth.centreId] || state.settingsByCentre.centre_a;
-    const result = demoExtract(req.body?.message || "", centreSettings);
+  const extractionUsage = new Map();
+  app.post("/api/ai/extract", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
+    const message = req.body?.message;
+    if (typeof message !== "string" || !message.trim() || message.length > 4000) {
+      return res.status(400).json({ error: "Message must be 1–4000 characters" });
+    }
+    const now = Date.now();
+    const key = `${req.auth.centreId}:${req.auth.userId}`;
+    const usage = extractionUsage.get(key);
+    if (usage && now - usage.start < 60_000 && usage.count >= 10) {
+      return res.status(429).json({ error: "AI extraction rate limit exceeded" });
+    }
+    extractionUsage.set(key, !usage || now - usage.start >= 60_000
+      ? { start: now, count: 1 }
+      : { start: usage.start, count: usage.count + 1 });
+    const centreSettings = state.settingsByCentre[req.auth.centreId];
+    const result = demoExtract(message, centreSettings);
     audit(state, "AI Service", `Generated ${result.tasks.length} extraction draft(s)`, req.auth.centreId, "AI", "Medium");
-    res.json(result);
+    return res.json({ ...result, requiresApproval: true });
   });
 
   app.get("/api/audit", requireRoles(ROLE_ADMIN), (req, res) => {
