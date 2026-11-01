@@ -33,6 +33,41 @@ export function openTaskStore(filePath, seedTasks = []) {
       db.exec("COMMIT");
     } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   }
+  if (version < 2) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`CREATE TABLE audit_events (
+        id TEXT PRIMARY KEY,
+        centre_id TEXT NOT NULL,
+        time TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        action TEXT NOT NULL,
+        resource_type TEXT NOT NULL,
+        resource_id TEXT NOT NULL
+      );
+      CREATE INDEX idx_audit_centre_time ON audit_events(centre_id,time DESC);
+      INSERT INTO schema_migrations(version) VALUES (2);`);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
+  }
+  const insertAudit = db.prepare(`INSERT INTO audit_events
+    (id,centre_id,time,actor_id,actor_role,action,resource_type,resource_id)
+    VALUES (?,?,?,?,?,?,?,?)`);
+  function writeAudit(event) {
+    insertAudit.run(event.id,event.centreId,event.time,event.actorId,event.actorRole,event.action,event.resourceType,event.resourceId);
+  }
+  function transaction(work) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = work();
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   const count = db.prepare("SELECT COUNT(*) AS count FROM tasks").get().count;
   if (count === 0 && seedTasks.length) {
     const insert = db.prepare(`INSERT INTO tasks
@@ -53,17 +88,23 @@ export function openTaskStore(filePath, seedTasks = []) {
         : db.prepare(select + " WHERE centre_id=? ORDER BY rowid DESC").all(centreId);
     },
     get(id) { return db.prepare(select + " WHERE id=?").get(id); },
-    create(task) {
+    create(task, event) {
       db.prepare(`INSERT INTO tasks (id,centre_id,parent_user_id,child,level,title,category,status,priority,due_label)
         VALUES (?,?,?,?,?,?,?,?,?,?)`).run(task.id,task.centreId,task.parentUserId,task.child,task.level,task.title,task.category,task.status,task.priority,task.dueLabel);
       return this.get(task.id);
     },
-    update(id, patch) {
+    update(id, patch, event) {
       const fields = { child:"child", level:"level", title:"title", category:"category", status:"status", priority:"priority", dueLabel:"due_label" };
       const keys = Object.keys(patch);
       if (!keys.length || keys.some(key => !fields[key])) throw new TypeError("Invalid task patch");
       db.prepare("UPDATE tasks SET " + keys.map(key => fields[key] + "=?").join(",") + " WHERE id=?").run(...keys.map(key => patch[key]),id);
       return this.get(id);
+    },
+    listAudit(centreId) {
+      return db.prepare(`SELECT id,centre_id AS centreId,time,actor_id AS actorId,
+        actor_role AS actorRole,action,resource_type AS resourceType,
+        resource_id AS resourceId FROM audit_events WHERE centre_id=?
+        ORDER BY time DESC,id DESC LIMIT 500`).all(centreId);
     },
     close() { db.close(); },
   };
