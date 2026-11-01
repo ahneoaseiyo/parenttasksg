@@ -400,13 +400,28 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     res.json(tasks);
   });
 
+  function taskAuditEvent(req, action, resourceId) {
+    return {
+      id: nanoid(),
+      centreId: req.auth.centreId,
+      time: new Date().toISOString(),
+      actorId: req.auth.userId,
+      actorRole: req.auth.role,
+      action,
+      resourceType: "Task",
+      resourceId,
+    };
+  }
+
   app.post("/api/tasks", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
     const parsed = validateTaskCreatePayload(req.body, req.auth.centreId);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const task = { id: nanoid(), status: "Not done", centreId: req.auth.centreId, ...parsed.value };
-    if (taskStore) taskStore.create(task);
-    else state.tasks.unshift(task);
-    audit(state, "Teacher", `Created task: ${task.title}`, req.auth.centreId, "Task");
+    if (taskStore) taskStore.create(task, taskAuditEvent(req, "task.created", task.id));
+    else {
+      state.tasks.unshift(task);
+      audit(state, "Teacher", `Created task: ${task.title}`, req.auth.centreId, "Task");
+    }
     res.status(201).json(task);
   });
 
@@ -418,8 +433,10 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
 
     const parsed = validateTaskPatchPayload(req.body, req.auth.role);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    const savedTask = taskStore ? taskStore.update(task.id, parsed.value) : Object.assign(task, parsed.value);
-    audit(state, "User", `Updated task: ${task.title}`, req.auth.centreId, "Task");
+    const savedTask = taskStore
+      ? taskStore.update(task.id, parsed.value, taskAuditEvent(req, "task.updated", task.id))
+      : Object.assign(task, parsed.value);
+    if (!taskStore) audit(state, "User", `Updated task: ${task.title}`, req.auth.centreId, "Task");
     return res.json(savedTask);
   });
 
@@ -516,7 +533,8 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   });
 
   app.get("/api/audit", requireRoles(ROLE_ADMIN), (req, res) => {
-    res.json(state.auditEvents.filter((event) => event.centreId === req.auth.centreId || event.centreId === "system"));
+    if (taskStore) return res.json(taskStore.listAudit(req.auth.centreId));
+    return res.json(state.auditEvents.filter((event) => event.centreId === req.auth.centreId || event.centreId === "system"));
   });
 
   app.get("/api/settings", requireRoles(ROLE_ADMIN), (req, res) => {
