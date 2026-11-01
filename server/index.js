@@ -316,14 +316,14 @@ function validateConsentPayload(rawPayload) {
   if (!isNonEmptyString(childId)) return { error: "Consent childId is required" };
 
   const consentRequestId = normalizeOptionalShortText(payload.consentRequestId);
-  if (consentRequestId !== undefined && !isNonEmptyString(consentRequestId)) return { error: "Invalid consent request ID" };
+  if (!isNonEmptyString(consentRequestId)) return { error: "Consent request ID is required" };
   const decision = normalizeOptionalShortText(payload.decision);
   if (decision !== undefined && !isNonEmptyString(decision)) return { error: "Invalid consent payload" };
 
   const notes = normalizeOptionalNote(payload.notes);
   if (notes !== undefined && !isNonEmptyString(notes, MAX_NOTE_LENGTH)) return { error: "Invalid consent payload" };
 
-  return { value: { childId, consentRequestId: consentRequestId ?? "legacy-demo", ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
+  return { value: { childId, consentRequestId, ...(decision !== undefined ? { decision } : {}), ...(notes !== undefined ? { notes } : {}) } };
 }
 
 function parentOwnsChild(state, centreId, parentUserId, childId) {
@@ -488,6 +488,57 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     res.status(201).json(message);
   });
 
+  function consentAudit(req,action,id) {
+    return {id:nanoid(),centreId:req.auth.centreId,time:new Date().toISOString(),
+      actorId:req.auth.userId,actorRole:req.auth.role,action,resourceType:"ConsentRequest",resourceId:id};
+  }
+
+  app.get("/api/consent-requests", requireRoles(ROLE_PARENT,ROLE_TEACHER,ROLE_ADMIN), (req,res) => {
+    if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
+    const childIds=req.auth.role===ROLE_PARENT
+      ? state.parentChildLinks.filter(link=>link.centreId===req.auth.centreId&&link.parentUserId===req.auth.userId).map(link=>link.childId)
+      : null;
+    return res.json(consentStore.listRequests(req.auth.centreId,childIds));
+  });
+
+  app.post("/api/consent-requests", requireRoles(ROLE_TEACHER,ROLE_ADMIN), (req,res) => {
+    if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
+    const body=req.body;
+    if (!body || typeof body!=="object" || Array.isArray(body) ||
+      !hasOnlyKnownKeys(body,new Set(["title","terms","expiresAt","childIds"])) ||
+      !isNonEmptyString(body.title) || !isNonEmptyString(body.terms,5000) ||
+      !Array.isArray(body.childIds) || !body.childIds.length ||
+      new Set(body.childIds).size!==body.childIds.length ||
+      !body.childIds.every(id=>isNonEmptyString(id) &&
+        state.children.some(child=>child.id===id&&child.centreId===req.auth.centreId)) ||
+      typeof body.expiresAt!=="string" || !/^\\d{4}-\\d{2}-\\d{2}T/.test(body.expiresAt) ||
+      !Number.isFinite(Date.parse(body.expiresAt)) ||
+      new Date(body.expiresAt).toISOString()!==body.expiresAt ||
+      body.expiresAt<=new Date().toISOString()) {
+      return res.status(400).json({error:"Invalid consent request"});
+    }
+    const request={id:nanoid(),centreId:req.auth.centreId,title:body.title.trim(),
+      terms:body.terms.trim(),status:"draft",expiresAt:body.expiresAt,createdAt:new Date().toISOString(),publishedAt:null};
+    consentStore.createRequest(request,body.childIds,consentAudit(req,"consent_request.created",request.id));
+    return res.status(201).json(request);
+  });
+
+  app.post("/api/consent-requests/:id/publish",requireRoles(ROLE_TEACHER,ROLE_ADMIN),(req,res)=>{
+    if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
+    const result=consentStore.transitionRequest(req.params.id,req.auth.centreId,"published",
+      new Date().toISOString(),consentAudit(req,"consent_request.published",req.params.id));
+    if (result.error) return res.status(result.error==="not_found"?404:409).json({error:result.error});
+    return res.json(result.value);
+  });
+
+  app.post("/api/consent-requests/:id/withdraw",requireRoles(ROLE_TEACHER,ROLE_ADMIN),(req,res)=>{
+    if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
+    const result=consentStore.transitionRequest(req.params.id,req.auth.centreId,"withdrawn",
+      new Date().toISOString(),consentAudit(req,"consent_request.withdrawn",req.params.id));
+    if (result.error) return res.status(result.error==="not_found"?404:409).json({error:result.error});
+    return res.json(result.value);
+  });
+
   app.get("/api/consents", requireRoles(ROLE_PARENT, ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
     const submissions = (consentStore
       ? consentStore.list(req.auth.centreId, req.auth.role === ROLE_PARENT ? req.auth.userId : null)
@@ -517,11 +568,13 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     };
     if (consentStore) {
       try {
-        consentStore.create(submission, {
+        const result = consentStore.create(submission, {
           id: nanoid(), centreId: req.auth.centreId, time: submission.submittedAt,
           actorId: req.auth.userId, actorRole: req.auth.role,
           action: "consent.submitted", resourceType: "Consent", resourceId: submission.id,
         });
+        if (result.error) return res.status(409).json({error:"Consent request unavailable, expired, withdrawn or not assigned to child"});
+        submission.termsSnapshot=result.value.termsSnapshot;
       } catch (error) {
         if (error.code === "ERR_SQLITE_ERROR" && /UNIQUE constraint failed/.test(error.message)) {
           return res.status(409).json({ error: "Consent already submitted for this child and request" });
@@ -529,6 +582,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
         throw error;
       }
     } else {
+      return res.status(503).json({error:"Consent request storage unavailable"});
       if (state.consentSubmissions.some((entry) => entry.centreId === submission.centreId &&
         entry.childId === submission.childId && entry.consentRequestId === submission.consentRequestId)) {
         return res.status(409).json({ error: "Consent already submitted for this child and request" });
