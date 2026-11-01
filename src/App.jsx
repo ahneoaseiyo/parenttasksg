@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from "framer-motion";
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const C = {
-  bg:"#F5F4F0", white:"#FFFFFF", ink:"#111111", ink2:"#444",
-  muted:"#999", border:"#E5E4DF", red:"#E63B2E", redBg:"#FFF0EF",
-  amber:"#D97706", amberBg:"#FFFBEB", green:"#16A34A", greenBg:"#F0FDF4",
-  blue:"#2563EB", blueBg:"#EFF6FF", teal:"#0D9488", tealBg:"#F0FDFA",
+  bg:"#F7F9F6", white:"#FFFFFF", ink:"#243247", ink2:"#425466",
+  muted:"#596779", border:"#DCE6DF", red:"#B42332", redBg:"#FFF1F2",
+  amber:"#936006", amberBg:"#FFF8E7", green:"#256B57", greenBg:"#E8F3ED",
+  blue:"#2456A6", blueBg:"#EDF4FF", teal:"#256B57", tealBg:"#E8F3ED",
   pill:{
     "Things to bring":["#EEF2FF","#4338CA"],
     "Consent form":["#FEF9C3","#854D0E"],
@@ -1142,23 +1142,34 @@ function ExtractScreen({setTasks,onBack}){
 // ── DASHBOARD (mobile-first) ──────────────────────────────────────────────────
 function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onConsentForm}){
   const [activeFilter,setActiveFilter]=useState("all");
+  const [selectedChild,setSelectedChild]=useState("all");
   const [q,setQ]=useState("");
 
   const pending=tasks.filter(t=>t.status!=="Done");
   const urgent=pending.filter(t=>t.priority==="High");
-  const tomorrow=pending.filter(t=>t.dueLabel==="Tomorrow");
+  const tomorrow=pending.filter(t=>t.dueLabel==="Tomorrow"&&(selectedChild==="all"||t.child===selectedChild));
   const done=tasks.filter(t=>t.status==="Done");
 
   const filterMap={all:tasks,pending,urgent,done};
   const filtered=useMemo(()=>(filterMap[activeFilter]||tasks).filter(t=>
-    t.title.toLowerCase().includes(q.toLowerCase())||t.category.toLowerCase().includes(q.toLowerCase())
-  ),[tasks,activeFilter,q]);
+    (selectedChild==="all"||t.child===selectedChild)&&
+    (t.title.toLowerCase().includes(q.toLowerCase())||t.category.toLowerCase().includes(q.toLowerCase()))
+  ),[tasks,activeFilter,q,selectedChild]);
+  const children=[...new Set(tasks.map(t=>t.child))];
+  const grouped=useMemo(()=>{
+    const groups=[["Tomorrow",[]],["Other upcoming",[]],["Completed",[]]];
+    filtered.forEach(t=>{
+      const index=t.status==="Done"?2:t.dueLabel==="Tomorrow"?0:1;
+      groups[index][1].push(t);
+    });
+    return groups.filter(([,items])=>items.length);
+  },[filtered]);
 
-  function toggle(id){setTasks(p=>p.map(t=>t.id===id?{...t,status:t.status==="Done"?"Not done":"Done"}:t));}
+  function toggle(id){setTasks(p=>p.map(t=>t.id===id&&t.category!=="Consent form"?{...t,status:t.status==="Done"?"Not done":"Done"}:t));}
   function shareT(id){setTasks(p=>p.map(t=>t.id===id&&!t.sharedWith.length?{...t,sharedWith:["Caregiver"]}:t));}
 
   const statCards=[
-    {key:"all",emoji:"📋",label:"All tasks",value:tasks.length,accent:"#6366F1"},
+    {key:"all",emoji:"📋",label:"All tasks",value:tasks.length,accent:C.blue},
     {key:"pending",emoji:"🔄",label:"Pending",value:pending.length,accent:C.amber},
     {key:"urgent",emoji:"🔴",label:"Urgent",value:urgent.length,accent:C.red},
     {key:"done",emoji:"✅",label:"Done",value:done.length,accent:C.green},
@@ -1168,19 +1179,19 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
     <div style={{minHeight:"100vh",background:C.bg,paddingBottom:80}}>
       {/* Sticky header */}
       <div style={{background:C.white,borderBottom:`1px solid ${C.border}`,padding:"0 16px",height:54,display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
-        <span style={{fontSize:20}}>🇸🇬</span>
+        <span aria-hidden="true" style={{display:"grid",placeItems:"center",width:32,height:32,borderRadius:10,background:C.green,color:C.white,fontWeight:900}}>P</span>
         <span style={{fontWeight:900,fontSize:16,color:C.ink,flex:1}}>ParentTask SG</span>
-        <button onClick={onCaregivers} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,color:C.ink2,fontWeight:700,fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>👥</button>
+        <button onClick={onCaregivers} aria-label="Manage caregivers" title="Manage caregivers" style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,color:C.ink2,fontWeight:700,fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>👥</button>
         <button onClick={onTeacher} style={{background:C.tealBg,border:`1px solid #99F6E4`,borderRadius:9,color:C.teal,fontWeight:700,fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>Teacher</button>
-        <button onClick={onLogout} style={{background:"transparent",border:"none",cursor:"pointer",fontSize:18,color:C.muted}}>←</button>
+        <button onClick={onLogout} aria-label="Log out" title="Log out" style={{background:"transparent",border:"none",cursor:"pointer",fontSize:18,color:C.muted}}>←</button>
       </div>
 
       <div style={{padding:"20px 16px",maxWidth:640,margin:"0 auto"}}>
         {/* Greeting */}
         <div style={{marginBottom:20}}>
-          <h1 style={{fontSize:24,fontWeight:900,margin:"0 0 4px",color:C.ink,letterSpacing:"-.02em"}}>Good evening 👋</h1>
+          <h1 style={{fontSize:27,fontWeight:800,margin:"0 0 6px",color:C.ink,letterSpacing:"-.035em"}}>Your family checklist</h1>
           <p style={{fontSize:13,color:C.muted,margin:0}}>
-            {pending.length===0?"You're all caught up! 🎉":`${pending.length} task${pending.length!==1?"s":""} need your attention.`}
+            {pending.length===0?"You are all caught up.":`${pending.length} task${pending.length!==1?"s":""} need your attention.`}
           </p>
         </div>
 
@@ -1196,10 +1207,15 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
         )}
 
         {/* Interactive ring stat cards */}
-        <div style={{display:"flex",gap:10,marginBottom:20}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:20}}>
           {statCards.map(s=>(
             <RingStat key={s.key} emoji={s.emoji} label={s.label} value={s.value} total={tasks.length} accent={s.accent} active={activeFilter===s.key} onClick={()=>setActiveFilter(activeFilter===s.key?"all":s.key)}/>
           ))}
+        </div>
+
+        {/* Filter tasks by child */}
+        <div role="group" aria-label="Filter by child" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+          {["all",...children].map(child=><button key={child} aria-pressed={selectedChild===child} onClick={()=>setSelectedChild(child)} style={{minHeight:44,padding:"8px 16px",borderRadius:24,border:`1px solid ${selectedChild===child?C.green:C.border}`,background:selectedChild===child?C.green:C.white,color:selectedChild===child?C.white:C.ink,fontWeight:700,cursor:"pointer"}}>{child==="all"?"Everyone":child}</button>)}
         </div>
 
         {/* Search */}
@@ -1229,13 +1245,15 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
             </motion.div>
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {filtered.map(task=>{
+              {grouped.flatMap(([groupName,items])=>[
+                <h2 key={`group-${groupName}`} style={{fontSize:14,fontWeight:800,color:C.ink,margin:"14px 0 2px"}}>{groupName}</h2>,
+                ...items.map(task=>{
                 const done=task.status==="Done";
                 const pDot=task.priority==="High"?C.red:task.priority==="Medium"?C.amber:"#D1D5DB";
                 return(
                   <motion.div key={task.id} layout initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0,scale:.96}} transition={{duration:.18}}>
                     <div style={{background:done?"#FAFAF8":C.white,borderRadius:16,border:`1px solid ${done?"#EFEFEA":C.border}`,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
-                      <button onClick={()=>toggle(task.id)} aria-label="Toggle"
+                      <button onClick={()=>toggle(task.id)} disabled={task.category==="Consent form"} title={task.category==="Consent form"?"Consent requires a verified submission":undefined} aria-label={task.category==="Consent form"?`Consent requires submission: ${task.title}`:`${done?"Mark not done":"Mark done"}: ${task.title}`} aria-pressed={done}
                         style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?C.ink:"#D1D5DB"}`,background:done?C.ink:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
                         {done&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </button>
@@ -1259,7 +1277,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
                                 ✍️ Sign
                               </button>
                             )}
-                            <button onClick={()=>shareT(task.id)} style={{border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",cursor:"pointer",fontSize:11,color:C.muted,fontWeight:600,padding:"4px 10px"}}>
+                            <button onClick={()=>shareT(task.id)} aria-label={`Share ${task.title}`} style={{border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",cursor:"pointer",fontSize:11,color:C.muted,fontWeight:600,padding:"4px 10px"}}>
                               🔗 Share
                             </button>
                           </div>
@@ -1268,7 +1286,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
                     </div>
                   </motion.div>
                 );
-              })}
+              })])}
             </div>
           )}
         </AnimatePresence>
@@ -1296,15 +1314,11 @@ function ConsentFormScreen({task, onSign, onBack}){
   const [medNeeds, setMedNeeds] = useState("None");
   const [signed, setSigned] = useState(false);
   const canSign = parentName.trim() && contact.trim() && agreed;
-  const today = "22 May 2026";
+  const today = new Date().toLocaleDateString("en-SG",{day:"numeric",month:"short",year:"numeric"});
 
   function handleSign(){
     if(!canSign) return;
     setSigned(true);
-    setTimeout(()=>{
-      onSign(task.id);
-      onBack();
-    }, 2200);
   }
 
   return(
@@ -1400,10 +1414,7 @@ function ConsentFormScreen({task, onSign, onBack}){
                 <span style={{fontSize:11,color:"#B45309"}}>我已阅读并同意上述条款。/ Saya telah membaca dan bersetuju dengan syarat-syarat di atas.</span>
               </div>
               <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
-                <div onClick={()=>setAgreed(!agreed)}
-                  style={{width:20,height:20,borderRadius:6,border:`2px solid ${agreed?C.green:C.border}`,background:agreed?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,cursor:"pointer",transition:"all .15s"}}>
-                  {agreed&&<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                </div>
+                <input type="checkbox" checked={agreed} onChange={e=>setAgreed(e.target.checked)} aria-label="I agree to the consent terms" style={{width:20,height:20,accentColor:C.green,flexShrink:0,marginTop:1}}/>
                 <span style={{fontSize:13,color:"#92400E",lineHeight:1.5,fontWeight:600}}>
                   I agree to the terms above and give consent for my child to attend this field trip. *
                 </span>
@@ -1415,15 +1426,16 @@ function ConsentFormScreen({task, onSign, onBack}){
               {signed ? (
                 <motion.div key="success" initial={{opacity:0,scale:.9}} animate={{opacity:1,scale:1}} style={{background:C.greenBg,border:`1px solid #BBF7D0`,borderRadius:14,padding:"20px",textAlign:"center"}}>
                   <div style={{fontSize:36,marginBottom:8}}>✅</div>
-                  <div style={{fontWeight:800,fontSize:16,color:C.green,marginBottom:4}}>Consent form submitted!</div>
-                  <div style={{fontSize:13,color:"#166534"}}>Signed by {parentName} · {today}</div>
-                  <div style={{fontSize:12,color:C.muted,marginTop:6}}>Returning to checklist…</div>
+                  <div style={{fontWeight:800,fontSize:16,color:C.green,marginBottom:4}}>Demo consent preview only</div>
+                  <div style={{fontSize:13,color:"#166534"}}>Previewed by {parentName} · {today}</div>
+                  <div role="status" style={{fontSize:12,color:C.muted,marginTop:6}}>No consent was sent or recorded. Production submission requires authenticated server confirmation.</div>
+                  <button onClick={onBack} style={{marginTop:12,padding:"10px 18px",borderRadius:10,border:`1px solid ${C.border}`,background:C.white,color:C.ink,cursor:"pointer"}}>Back to tasks</button>
                 </motion.div>
               ) : (
                 <motion.div key="btn">
                   <button onClick={handleSign} disabled={!canSign}
                     style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:canSign?C.green:"#D1D5DB",color:"#fff",fontWeight:800,fontSize:15,cursor:canSign?"pointer":"not-allowed",transition:"all .2s"}}>
-                    ✍️ Sign &amp; Submit Consent Form
+                    Preview consent (demo only)
                   </button>
                   {!canSign&&(
                     <div style={{textAlign:"center",fontSize:12,color:C.muted,marginTop:8}}>
@@ -1471,7 +1483,7 @@ export default function App(){
         {screen==="teacher"&&<motion.div key="teacher" {...fd}><TeacherScreen onBack={()=>setScreen("login")}/></motion.div>}
         {screen==="consent"&&<motion.div key="consent" {...fd}><ConsentFormScreen task={consentTask} onSign={signConsent} onBack={()=>setScreen("dash")}/></motion.div>}
       </AnimatePresence>
-      <style>{`*{box-sizing:border-box;}button,input,textarea,select{font-family:inherit;}textarea{font-family:inherit;}`}</style>
+      <style>{`*{box-sizing:border-box;}button,input,textarea,select{font-family:inherit;}textarea{font-family:inherit;}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #256B57;outline-offset:3px;}@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}`}</style>
     </div>
   );
 }
