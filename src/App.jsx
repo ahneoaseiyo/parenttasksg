@@ -1165,7 +1165,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
     return groups.filter(([,items])=>items.length);
   },[filtered]);
 
-  function toggle(id){setTasks(p=>p.map(t=>t.id===id?{...t,status:t.status==="Done"?"Not done":"Done"}:t));}
+  function toggle(id){setTasks(p=>p.map(t=>t.id===id&&t.category!=="Consent form"?{...t,status:t.status==="Done"?"Not done":"Done"}:t));}
   function shareT(id){setTasks(p=>p.map(t=>t.id===id&&!t.sharedWith.length?{...t,sharedWith:["Caregiver"]}:t));}
 
   const statCards=[
@@ -1253,7 +1253,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
                 return(
                   <motion.div key={task.id} layout initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0,scale:.96}} transition={{duration:.18}}>
                     <div style={{background:done?"#FAFAF8":C.white,borderRadius:16,border:`1px solid ${done?"#EFEFEA":C.border}`,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
-                      <button onClick={()=>toggle(task.id)} aria-label={`${done?"Mark not done":"Mark done"}: ${task.title}`} aria-pressed={done}
+                      <button onClick={()=>toggle(task.id)} disabled={task.category==="Consent form"} title={task.category==="Consent form"?"Consent requires a verified submission":undefined} aria-label={task.category==="Consent form"?`Consent requires submission: ${task.title}`:`${done?"Mark not done":"Mark done"}: ${task.title}`} aria-pressed={done}
                         style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?C.ink:"#D1D5DB"}`,background:done?C.ink:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
                         {done&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </button>
@@ -1319,10 +1319,6 @@ function ConsentFormScreen({task, onSign, onBack}){
   function handleSign(){
     if(!canSign) return;
     setSigned(true);
-    setTimeout(()=>{
-      onSign(task.id);
-      onBack();
-    }, 2200);
   }
 
   return(
@@ -1433,15 +1429,16 @@ function ConsentFormScreen({task, onSign, onBack}){
               {signed ? (
                 <motion.div key="success" initial={{opacity:0,scale:.9}} animate={{opacity:1,scale:1}} style={{background:C.greenBg,border:`1px solid #BBF7D0`,borderRadius:14,padding:"20px",textAlign:"center"}}>
                   <div style={{fontSize:36,marginBottom:8}}>✅</div>
-                  <div style={{fontWeight:800,fontSize:16,color:C.green,marginBottom:4}}>Consent form submitted!</div>
-                  <div style={{fontSize:13,color:"#166534"}}>Signed by {parentName} · {today}</div>
-                  <div style={{fontSize:12,color:C.muted,marginTop:6}}>Returning to checklist…</div>
+                  <div style={{fontWeight:800,fontSize:16,color:C.green,marginBottom:4}}>Demo consent preview only</div>
+                  <div style={{fontSize:13,color:"#166534"}}>Previewed by {parentName} · {today}</div>
+                  <div role="status" style={{fontSize:12,color:C.muted,marginTop:6}}>No consent was sent or recorded. Production submission requires authenticated server confirmation.</div>
+                  <button onClick={onBack} style={{marginTop:12,padding:"10px 18px",borderRadius:10,border:`1px solid ${C.border}`,background:C.white,color:C.ink,cursor:"pointer"}}>Back to tasks</button>
                 </motion.div>
               ) : (
                 <motion.div key="btn">
                   <button onClick={handleSign} disabled={!canSign}
                     style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:canSign?C.green:"#D1D5DB",color:"#fff",fontWeight:800,fontSize:15,cursor:canSign?"pointer":"not-allowed",transition:"all .2s"}}>
-                    ✍️ Sign &amp; Submit Consent Form
+                    Preview consent (demo only)
                   </button>
                   {!canSign&&(
                     <div style={{textAlign:"center",fontSize:12,color:C.muted,marginTop:8}}>
