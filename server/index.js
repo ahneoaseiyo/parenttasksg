@@ -417,9 +417,11 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     const parsed = validateTaskCreatePayload(req.body, req.auth.centreId);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const task = { id: nanoid(), status: "Not done", centreId: req.auth.centreId, ...parsed.value };
-    if (taskStore) taskStore.create(task);
-    else state.tasks.unshift(task);
-    audit(state, "Teacher", `Created task: ${task.title}`, req.auth.centreId, "Task");
+    if (taskStore) taskStore.create(task, taskAuditEvent(req, "task.created", task.id));
+    else {
+      state.tasks.unshift(task);
+      audit(state, "Teacher", `Created task: ${task.title}`, req.auth.centreId, "Task");
+    }
     res.status(201).json(task);
   });
 
@@ -431,8 +433,10 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
 
     const parsed = validateTaskPatchPayload(req.body, req.auth.role);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    const savedTask = taskStore ? taskStore.update(task.id, parsed.value) : Object.assign(task, parsed.value);
-    audit(state, "User", `Updated task: ${task.title}`, req.auth.centreId, "Task");
+    const savedTask = taskStore
+      ? taskStore.update(task.id, parsed.value, taskAuditEvent(req, "task.updated", task.id))
+      : Object.assign(task, parsed.value);
+    if (!taskStore) audit(state, "User", `Updated task: ${task.title}`, req.auth.centreId, "Task");
     return res.json(savedTask);
   });
 
