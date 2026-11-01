@@ -511,7 +511,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       new Set(body.childIds).size!==body.childIds.length ||
       !body.childIds.every(id=>isNonEmptyString(id) &&
         state.children.some(child=>child.id===id&&child.centreId===req.auth.centreId)) ||
-      typeof body.expiresAt!=="string" || !/^\\d{4}-\\d{2}-\\d{2}T/.test(body.expiresAt) ||
+      typeof body.expiresAt!=="string" || !/^\d{4}-\d{2}-\d{2}T/.test(body.expiresAt) ||
       !Number.isFinite(Date.parse(body.expiresAt)) ||
       new Date(body.expiresAt).toISOString()!==body.expiresAt ||
       body.expiresAt<=new Date().toISOString()) {
