@@ -491,6 +491,59 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       actorId:req.auth.userId,actorRole:req.auth.role,action,resourceType:"ConsentRequest",resourceId:id};
   }
 
+  function rosterAudit(req,action,id) {
+    return {id:nanoid(),centreId:req.auth.centreId,time:new Date().toISOString(),
+      actorId:req.auth.userId,actorRole:req.auth.role,action,
+      resourceType:"Enrolment",resourceId:id};
+  }
+  app.get("/api/enrolments",requireRoles(ROLE_ADMIN),(req,res)=>{
+    if(!rosterStore)return res.status(503).json({error:"Roster storage unavailable"});
+    return res.json({children:rosterStore.listChildren(req.auth.centreId),
+      links:rosterStore.listLinks(req.auth.centreId)});
+  });
+  app.post("/api/enrolments/children",requireRoles(ROLE_ADMIN),(req,res)=>{
+    if(!rosterStore)return res.status(503).json({error:"Roster storage unavailable"});
+    if(!req.body || typeof req.body!=="object" || Array.isArray(req.body) ||
+      !hasOnlyKnownKeys(req.body,new Set(["name"])) ||
+      !isNonEmptyString(req.body.name))return res.status(400).json({error:"Invalid child"});
+    const child={id:nanoid(),centreId:req.auth.centreId,name:req.body.name.trim()};
+    rosterStore.addChild(child,rosterAudit(req,"enrolment.child_created",child.id));
+    return res.status(201).json(child);
+  });
+  app.post("/api/enrolments/links",requireRoles(ROLE_ADMIN),(req,res)=>{
+    if(!rosterStore)return res.status(503).json({error:"Roster storage unavailable"});
+    const body=req.body;
+    if(!body || typeof body!=="object" || Array.isArray(body) ||
+      !hasOnlyKnownKeys(body,new Set(["childId","parentUserId","verificationReference"])) ||
+      !isNonEmptyString(body.childId) || !isNonEmptyString(body.parentUserId) ||
+      !isNonEmptyString(body.verificationReference) ||
+      !parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId))
+      return res.status(400).json({error:"Invalid parent link or verification reference"});
+    try {
+      const result=rosterStore.linkParent(req.auth.centreId,body.parentUserId,body.childId,
+        rosterAudit(req,"enrolment.parent_linked",body.childId));
+      if(result.error)return res.status(404).json({error:"Child not found"});
+      return res.status(201).json({centreId:req.auth.centreId,
+        parentUserId:body.parentUserId,childId:body.childId});
+    } catch(error) {
+      if(error.code==="ERR_SQLITE_ERROR" && /UNIQUE constraint failed/.test(error.message))
+        return res.status(409).json({error:"Link already exists"});
+      throw error;
+    }
+  });
+  app.delete("/api/enrolments/links",requireRoles(ROLE_ADMIN),(req,res)=>{
+    if(!rosterStore)return res.status(503).json({error:"Roster storage unavailable"});
+    const body=req.body;
+    if(!body || typeof body!=="object" || Array.isArray(body) ||
+      !hasOnlyKnownKeys(body,new Set(["childId","parentUserId"])) ||
+      !isNonEmptyString(body.childId) || !isNonEmptyString(body.parentUserId))
+      return res.status(400).json({error:"Invalid parent link"});
+    const result=rosterStore.revokeParent(req.auth.centreId,body.parentUserId,body.childId,
+      rosterAudit(req,"enrolment.parent_revoked",body.childId));
+    if(result.error)return res.status(404).json({error:"Link not found"});
+    return res.status(204).end();
+  });
+
   app.get("/api/consent-requests", requireRoles(ROLE_PARENT,ROLE_TEACHER,ROLE_ADMIN), (req,res) => {
     if (!consentStore) return res.status(503).json({error:"Consent request storage unavailable"});
     const childIds=req.auth.role===ROLE_PARENT
