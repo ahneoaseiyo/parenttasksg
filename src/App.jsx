@@ -1,5 +1,7 @@
 ﻿import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { createTaskApi } from "./taskApi.js";
+import { loadVerifiedTasks, saveVerifiedStatus } from "./taskSync.js";
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const C = {
@@ -1140,7 +1142,7 @@ function ExtractScreen({setTasks,onBack}){
 }
 
 // ── DASHBOARD (mobile-first) ──────────────────────────────────────────────────
-function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onConsentForm}){
+function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onConsentForm,onVerifiedToggle,verifiedMode,apiBusy}){
   const [activeFilter,setActiveFilter]=useState("all");
   const [selectedChild,setSelectedChild]=useState("all");
   const [q,setQ]=useState("");
@@ -1165,7 +1167,10 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
     return groups.filter(([,items])=>items.length);
   },[filtered]);
 
-  function toggle(id){setTasks(p=>p.map(t=>t.id===id&&t.category!=="Consent form"?{...t,status:t.status==="Done"?"Not done":"Done"}:t));}
+  function toggle(id){
+    if(verifiedMode){ onVerifiedToggle(id); return; }
+    setTasks(p=>p.map(t=>t.id===id&&t.category!=="Consent form"?{...t,status:t.status==="Done"?"Not done":"Done"}:t));
+  }
   function shareT(id){setTasks(p=>p.map(t=>t.id===id&&!t.sharedWith.length?{...t,sharedWith:["Caregiver"]}:t));}
 
   const statCards=[
@@ -1253,7 +1258,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
                 return(
                   <motion.div key={task.id} layout initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0,scale:.96}} transition={{duration:.18}}>
                     <div style={{background:done?"#FAFAF8":C.white,borderRadius:16,border:`1px solid ${done?"#EFEFEA":C.border}`,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
-                      <button onClick={()=>toggle(task.id)} disabled={task.category==="Consent form"} title={task.category==="Consent form"?"Consent requires a verified submission":undefined} aria-label={task.category==="Consent form"?`Consent requires submission: ${task.title}`:`${done?"Mark not done":"Mark done"}: ${task.title}`} aria-pressed={done}
+                      <button onClick={()=>toggle(task.id)} disabled={task.category==="Consent form"||(verifiedMode&&apiBusy)} title={task.category==="Consent form"?"Consent requires a verified submission":undefined} aria-label={task.category==="Consent form"?`Consent requires submission: ${task.title}`:`${done?"Mark not done":"Mark done"}: ${task.title}`} aria-pressed={done}
                         style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?C.ink:"#D1D5DB"}`,background:done?C.ink:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
                         {done&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </button>
@@ -1463,6 +1468,36 @@ export default function App(){
   const [screen,setScreen]=useState("login");
   const [tasks,setTasks]=useState(SEED);
   const [consentTask,setConsentTask]=useState(null);
+  const [devToken,setDevToken]=useState("");
+  const [verifiedMode,setVerifiedMode]=useState(false);
+  const [apiBusy,setApiBusy]=useState(false);
+  const [apiError,setApiError]=useState("");
+  const isDevelopment=import.meta.env.DEV;
+  const taskApi=createTaskApi({baseUrl:"http://127.0.0.1:8787",getAccessToken:()=>devToken});
+
+  async function connectDevApi(){
+    if(!isDevelopment||apiBusy)return;
+    setApiBusy(true);setApiError("");
+    try{
+      const loaded=await loadVerifiedTasks(taskApi);
+      setTasks(loaded);setVerifiedMode(true);
+    }catch(error){setApiError(error.message||"Could not load tasks");}
+    finally{setApiBusy(false);}
+  }
+
+  async function toggleVerifiedTask(id){
+    if(!verifiedMode||apiBusy)return;
+    const task=tasks.find(item=>item.id===id);
+    if(!task)return;
+    setApiBusy(true);setApiError("");
+    try{
+      const confirmed=await saveVerifiedStatus(taskApi,task);
+      setTasks(previous=>previous.map(item=>item.id===id?confirmed:item));
+    }catch(error){setApiError(error.message||"Could not update task");}
+    finally{setApiBusy(false);}
+  }
+
+  function disconnectDevApi(){setVerifiedMode(false);setDevToken("");setTasks(SEED);setApiError("");}
 
   function openConsent(task){ setConsentTask(task); setScreen("consent"); }
   function signConsent(taskId){
@@ -1477,12 +1512,13 @@ export default function App(){
         {screen==="gov"&&<motion.div key="gov" {...fd}><GovReadinessScreen onBack={()=>setScreen("login")} onDemo={()=>setScreen("dash")}/></motion.div>}
         {screen==="admin"&&<motion.div key="admin" {...fd}><AdminConsoleScreen onBack={()=>setScreen("login")} onTeacher={()=>setScreen("teacher")}/></motion.div>}
         {screen==="setup"&&<motion.div key="setup" {...fd}><ProfileSetupScreen onDone={()=>setScreen("dash")}/></motion.div>}
-        {screen==="dash"&&<motion.div key="dash" {...fd}><Dashboard tasks={tasks} setTasks={setTasks} onExtract={()=>setScreen("extract")} onCaregivers={()=>setScreen("caregivers")} onTeacher={()=>setScreen("teacher")} onLogout={()=>setScreen("login")} onConsentForm={openConsent}/></motion.div>}
+        {screen==="dash"&&<motion.div key="dash" {...fd}><Dashboard verifiedMode={verifiedMode} apiBusy={apiBusy} onVerifiedToggle={toggleVerifiedTask} tasks={tasks} setTasks={setTasks} onExtract={()=>setScreen("extract")} onCaregivers={()=>setScreen("caregivers")} onTeacher={()=>setScreen("teacher")} onLogout={()=>setScreen("login")} onConsentForm={openConsent}/></motion.div>}
         {screen==="extract"&&<motion.div key="extract" {...fd}><ExtractScreen tasks={tasks} setTasks={setTasks} onBack={()=>setScreen("dash")}/></motion.div>}
         {screen==="caregivers"&&<motion.div key="caregivers" {...fd}><CaregiverScreen tasks={tasks} setTasks={setTasks} onBack={()=>setScreen("dash")}/></motion.div>}
         {screen==="teacher"&&<motion.div key="teacher" {...fd}><TeacherScreen onBack={()=>setScreen("login")}/></motion.div>}
         {screen==="consent"&&<motion.div key="consent" {...fd}><ConsentFormScreen task={consentTask} onSign={signConsent} onBack={()=>setScreen("dash")}/></motion.div>}
       </AnimatePresence>
+      {isDevelopment&&screen==="dash"&&<aside aria-label="Development API testing" style={{position:"fixed",bottom:0,left:0,right:0,zIndex:30,background:"#fff",borderTop:"2px solid #256B57",padding:"8px 12px",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><strong style={{fontSize:12}}>DEV ONLY — {verifiedMode?"Server tasks":"Local demo tasks"}</strong>{!verifiedMode?<><input type="password" aria-label="Development bearer token" autoComplete="off" placeholder="Paste local demo bearer token" value={devToken} onChange={e=>setDevToken(e.target.value)} /><button disabled={apiBusy||!devToken} onClick={connectDevApi}>Connect local API</button></>:<button disabled={apiBusy} onClick={disconnectDevApi}>Disconnect API</button>}{apiBusy&&<span role="status">Waiting for server…</span>}{apiError&&<span role="alert" style={{color:"#B42332"}}>{apiError}</span>}</aside>}
       <style>{`*{box-sizing:border-box;}button,input,textarea,select{font-family:inherit;}textarea{font-family:inherit;}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #256B57;outline-offset:3px;}@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}`}</style>
     </div>
   );
