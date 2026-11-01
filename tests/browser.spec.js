@@ -16,7 +16,7 @@ test("parent can filter tasks by child and reset to everyone", async ({ page }) 
   await expect(page.getByText("Pack extra clothes for water play")).toBeVisible();
   await expect(page.getByText("Bring one clean cardboard box")).toHaveCount(0);
   await page.getByRole("group", { name: "Filter by child" }).getByRole("button", { name: "Everyone" }).click();
-  await expect(page.getByText("Bring one clean cardboard box")).toBeVisible();
+  await expect(page.getByText("Bring one clean cardboard box").last()).toBeVisible();
 });
 
 test("ordinary tasks can be completed and reopened", async ({ page }) => {
