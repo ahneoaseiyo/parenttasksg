@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from "framer-motion";
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const C = {
-  bg:"#F5F4F0", white:"#FFFFFF", ink:"#111111", ink2:"#444",
-  muted:"#999", border:"#E5E4DF", red:"#E63B2E", redBg:"#FFF0EF",
-  amber:"#D97706", amberBg:"#FFFBEB", green:"#16A34A", greenBg:"#F0FDF4",
-  blue:"#2563EB", blueBg:"#EFF6FF", teal:"#0D9488", tealBg:"#F0FDFA",
+  bg:"#F7F9F6", white:"#FFFFFF", ink:"#243247", ink2:"#425466",
+  muted:"#596779", border:"#DCE6DF", red:"#B42332", redBg:"#FFF1F2",
+  amber:"#936006", amberBg:"#FFF8E7", green:"#256B57", greenBg:"#E8F3ED",
+  blue:"#2456A6", blueBg:"#EDF4FF", teal:"#256B57", tealBg:"#E8F3ED",
   pill:{
     "Things to bring":["#EEF2FF","#4338CA"],
     "Consent form":["#FEF9C3","#854D0E"],
@@ -1158,7 +1158,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
   function shareT(id){setTasks(p=>p.map(t=>t.id===id&&!t.sharedWith.length?{...t,sharedWith:["Caregiver"]}:t));}
 
   const statCards=[
-    {key:"all",emoji:"📋",label:"All tasks",value:tasks.length,accent:"#6366F1"},
+    {key:"all",emoji:"📋",label:"All tasks",value:tasks.length,accent:C.blue},
     {key:"pending",emoji:"🔄",label:"Pending",value:pending.length,accent:C.amber},
     {key:"urgent",emoji:"🔴",label:"Urgent",value:urgent.length,accent:C.red},
     {key:"done",emoji:"✅",label:"Done",value:done.length,accent:C.green},
@@ -1168,19 +1168,19 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
     <div style={{minHeight:"100vh",background:C.bg,paddingBottom:80}}>
       {/* Sticky header */}
       <div style={{background:C.white,borderBottom:`1px solid ${C.border}`,padding:"0 16px",height:54,display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
-        <span style={{fontSize:20}}>🇸🇬</span>
+        <span aria-hidden="true" style={{display:"grid",placeItems:"center",width:32,height:32,borderRadius:10,background:C.green,color:C.white,fontWeight:900}}>P</span>
         <span style={{fontWeight:900,fontSize:16,color:C.ink,flex:1}}>ParentTask SG</span>
-        <button onClick={onCaregivers} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,color:C.ink2,fontWeight:700,fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>👥</button>
+        <button onClick={onCaregivers} aria-label="Manage caregivers" title="Manage caregivers" style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,color:C.ink2,fontWeight:700,fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>👥</button>
         <button onClick={onTeacher} style={{background:C.tealBg,border:`1px solid #99F6E4`,borderRadius:9,color:C.teal,fontWeight:700,fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>Teacher</button>
-        <button onClick={onLogout} style={{background:"transparent",border:"none",cursor:"pointer",fontSize:18,color:C.muted}}>←</button>
+        <button onClick={onLogout} aria-label="Log out" title="Log out" style={{background:"transparent",border:"none",cursor:"pointer",fontSize:18,color:C.muted}}>←</button>
       </div>
 
       <div style={{padding:"20px 16px",maxWidth:640,margin:"0 auto"}}>
         {/* Greeting */}
         <div style={{marginBottom:20}}>
-          <h1 style={{fontSize:24,fontWeight:900,margin:"0 0 4px",color:C.ink,letterSpacing:"-.02em"}}>Good evening 👋</h1>
+          <h1 style={{fontSize:27,fontWeight:800,margin:"0 0 6px",color:C.ink,letterSpacing:"-.035em"}}>Your family checklist</h1>
           <p style={{fontSize:13,color:C.muted,margin:0}}>
-            {pending.length===0?"You're all caught up! 🎉":`${pending.length} task${pending.length!==1?"s":""} need your attention.`}
+            {pending.length===0?"You are all caught up.":`${pending.length} task${pending.length!==1?"s":""} need your attention.`}
           </p>
         </div>
 
@@ -1196,7 +1196,7 @@ function Dashboard({tasks,setTasks,onExtract,onCaregivers,onTeacher,onLogout,onC
         )}
 
         {/* Interactive ring stat cards */}
-        <div style={{display:"flex",gap:10,marginBottom:20}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:20}}>
           {statCards.map(s=>(
             <RingStat key={s.key} emoji={s.emoji} label={s.label} value={s.value} total={tasks.length} accent={s.accent} active={activeFilter===s.key} onClick={()=>setActiveFilter(activeFilter===s.key?"all":s.key)}/>
           ))}
@@ -1471,7 +1471,7 @@ export default function App(){
         {screen==="teacher"&&<motion.div key="teacher" {...fd}><TeacherScreen onBack={()=>setScreen("login")}/></motion.div>}
         {screen==="consent"&&<motion.div key="consent" {...fd}><ConsentFormScreen task={consentTask} onSign={signConsent} onBack={()=>setScreen("dash")}/></motion.div>}
       </AnimatePresence>
-      <style>{`*{box-sizing:border-box;}button,input,textarea,select{font-family:inherit;}textarea{font-family:inherit;}`}</style>
+      <style>{`*{box-sizing:border-box;}button,input,textarea,select{font-family:inherit;}textarea{font-family:inherit;}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #256B57;outline-offset:3px;}@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}`}</style>
     </div>
   );
 }
