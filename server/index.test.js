@@ -123,7 +123,7 @@ test("consent submission is denied for unrelated child", async () => {
         "content-type": "application/json",
         ...authHeader(AUTH_TOKENS.parentHafizCentreA),
       },
-      body: JSON.stringify({ childId: "child_arielle_a" }),
+      body: JSON.stringify({ childId: "child_arielle_a", consentRequestId: "fake_request" }),
     });
 
     assert.equal(response.status, 403);
