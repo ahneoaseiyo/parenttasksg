@@ -1,4 +1,5 @@
 import { createOidcVerifier } from "./oidcAuth.js";
+import { openIdentityStore } from "./identityStore.js";
 import { openRosterStore } from "./rosterStore.js";
 import { openConsentStore } from "./consentStore.js";
 import { openTaskStore } from "./taskStore.js";
@@ -385,7 +386,9 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
   const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
   const rosterStore = taskStore ? openRosterStore(taskDbPath,state.children,state.parentChildLinks) : null;
+  const identityStore = taskStore ? openIdentityStore(taskDbPath) : null;
   app.locals.closeTaskStore = () => {
+    identityStore?.close();
     rosterStore?.close();
     consentStore?.close();
     taskStore?.close();
@@ -509,6 +512,28 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       actorId:req.auth.userId,actorRole:req.auth.role,action,
       resourceType:"Enrolment",resourceId:id};
   }
+  app.post("/api/identities",requireRoles(ROLE_ADMIN),(req,res)=>{
+    if(!identityStore)return res.status(503).json({error:"Identity storage unavailable"});
+    const body=req.body;
+    if(!body || typeof body!=="object" || Array.isArray(body) ||
+      !hasOnlyKnownKeys(body,new Set(["issuer","subject","userId","role"])) ||
+      ![body.issuer,body.subject,body.userId].every(isNonEmptyString) ||
+      !["parent","teacher"].includes(body.role))
+      return res.status(400).json({error:"Invalid identity"});
+    try {
+      identityStore.provision({...body,centreId:req.auth.centreId},
+        rosterAudit(req,"identity.provisioned",body.userId));
+      return res.status(201).json({userId:body.userId,centreId:req.auth.centreId,role:body.role});
+    } catch {return res.status(409).json({error:"Identity conflict or invalid identity"});}
+  });
+  app.delete("/api/identities/:userId",requireRoles(ROLE_ADMIN),(req,res)=>{
+    if(!identityStore)return res.status(503).json({error:"Identity storage unavailable"});
+    try {
+      const changed=identityStore.deactivate(req.auth.centreId,req.params.userId,
+        rosterAudit(req,"identity.deactivated",req.params.userId));
+      return changed?res.status(204).end():res.status(404).json({error:"Identity not found"});
+    } catch {return res.status(400).json({error:"Invalid identity"});}
+  });
   app.get("/api/enrolments",requireRoles(ROLE_ADMIN),(req,res)=>{
     if(!rosterStore)return res.status(503).json({error:"Roster storage unavailable"});
     return res.json({children:rosterStore.listChildren(req.auth.centreId),
@@ -530,7 +555,9 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       !hasOnlyKnownKeys(body,new Set(["childId","parentUserId","verificationReference"])) ||
       !isNonEmptyString(body.childId) || !isNonEmptyString(body.parentUserId) ||
       !isNonEmptyString(body.verificationReference) ||
-      !parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId))
+      !(identityStore ? identityStore.isActiveParent(req.auth.centreId,body.parentUserId) ||
+        (app.locals.demoAuthEnabled && parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId)) :
+        app.locals.demoAuthEnabled && parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId)))
       return res.status(400).json({error:"Invalid parent link or verification reference"});
     try {
       const result=rosterStore.linkParent(req.auth.centreId,body.parentUserId,body.childId,
