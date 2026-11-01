@@ -1,4 +1,5 @@
 import { createOidcVerifier } from "./oidcAuth.js";
+import { openIdentityStore } from "./identityStore.js";
 import { openRosterStore } from "./rosterStore.js";
 import { openConsentStore } from "./consentStore.js";
 import { openTaskStore } from "./taskStore.js";
@@ -385,7 +386,9 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
   const taskStore = taskDbPath ? openTaskStore(taskDbPath, state.tasks) : null;
   const consentStore = taskStore ? openConsentStore(taskDbPath) : null;
   const rosterStore = taskStore ? openRosterStore(taskDbPath,state.children,state.parentChildLinks) : null;
+  const identityStore = taskStore ? openIdentityStore(taskDbPath) : null;
   app.locals.closeTaskStore = () => {
+    identityStore?.close();
     rosterStore?.close();
     consentStore?.close();
     taskStore?.close();
@@ -530,7 +533,9 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       !hasOnlyKnownKeys(body,new Set(["childId","parentUserId","verificationReference"])) ||
       !isNonEmptyString(body.childId) || !isNonEmptyString(body.parentUserId) ||
       !isNonEmptyString(body.verificationReference) ||
-      !parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId))
+      !(identityStore ? identityStore.isActiveParent(req.auth.centreId,body.parentUserId) ||
+        (app.locals.demoAuthEnabled && parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId)) :
+        app.locals.demoAuthEnabled && parentPrincipalsByCentre.get(req.auth.centreId)?.has(body.parentUserId)))
       return res.status(400).json({error:"Invalid parent link or verification reference"});
     try {
       const result=rosterStore.linkParent(req.auth.centreId,body.parentUserId,body.childId,
