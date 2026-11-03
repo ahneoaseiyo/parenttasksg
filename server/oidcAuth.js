@@ -6,7 +6,7 @@ function decode(value) {
 
 // External OIDC provider must issue RS256 access tokens for this API audience.
 // Identity-to-role mapping is server-controlled; token claims cannot assign roles.
-export function createOidcVerifier({issuer,audience,jwksUrl,identities=[],resolveIdentity,fetchKeys=fetch}) {
+export function createOidcVerifier({issuer,audience,jwksUrl,identities=[],resolveIdentity,fetchKeys=fetch,refreshCooldownMs=30000}) {
   if(!issuer || !audience || !jwksUrl || !Array.isArray(identities) ||
     (resolveIdentity !== undefined && typeof resolveIdentity !== 'function') ||
     !jwksUrl.startsWith("https://")) throw new Error("OIDC configuration incomplete");
@@ -17,14 +17,24 @@ export function createOidcVerifier({issuer,audience,jwksUrl,identities=[],resolv
       principals.has(identity.sub)) throw new Error("Invalid OIDC identity mapping");
     principals.set(identity.sub,{userId:identity.userId,centreId:identity.centreId,role:identity.role});
   }
-  let keys=null,loadedAt=0;
-  async function loadKeys(force=false) {
-    if(!force && keys && Date.now()-loadedAt<300000)return keys;
+  // Deduplicate concurrent JWKS requests and rate-limit unknown-kid refresh attempts.
+  let keys=null,loadedAt=0,lastAttemptAt=0,inflight=null;
+  async function fetchJwks() {
     const response=await fetchKeys(jwksUrl,{signal:AbortSignal.timeout(5000)});
     if(!response.ok)throw new Error("OIDC key retrieval failed");
     const payload=await response.json();
     if(!Array.isArray(payload.keys))throw new Error("Invalid JWKS");
     keys=payload.keys;loadedAt=Date.now();return keys;
+  }
+  async function loadKeys(force=false) {
+    const now=Date.now();
+    if(!force && keys && now-loadedAt<300000)return keys;
+    if(inflight)return inflight;
+    if(keys && now-lastAttemptAt<refreshCooldownMs)return keys;
+    if(!keys && lastAttemptAt && now-lastAttemptAt<refreshCooldownMs)throw new Error("OIDC key retrieval throttled");
+    lastAttemptAt=now;
+    inflight=fetchJwks().finally(()=>{inflight=null;});
+    return inflight;
   }
   return async function verifyToken(token) {
     if(typeof token!=="string" || token.length>8192)throw new Error("Invalid access token");
