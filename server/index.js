@@ -440,6 +440,16 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     };
   }
 
+  // Persist structured identifiers only; never log private message content.
+  function recordAudit(req, {action,resourceType,resourceId,legacy}) {
+    if(taskStore) {
+      taskStore.audit({id:nanoid(),centreId:req.auth.centreId,time:new Date().toISOString(),
+        actorId:req.auth.userId,actorRole:req.auth.role,action,resourceType,resourceId});
+    } else {
+      audit(state,legacy.actor,legacy.text,req.auth.centreId,legacy.type,legacy.risk);
+    }
+  }
+
   app.post("/api/tasks", requireRoles(ROLE_TEACHER, ROLE_ADMIN), (req, res) => {
     const parsed = validateTaskCreatePayload(req.body, req.auth.centreId);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
@@ -477,7 +487,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const broadcast = { id: nanoid(), centreId: req.auth.centreId, sentTo: 0, done: 0, pending: 0, ...parsed.value };
     state.broadcasts.unshift(broadcast);
-    audit(state, "Teacher", `Sent broadcast: ${broadcast.title}`, req.auth.centreId, "Broadcast");
+    recordAudit(req,{action:"broadcast.created",resourceType:"Broadcast",resourceId:broadcast.id,legacy:{actor:"Teacher",text:`Sent broadcast: ${broadcast.title}`,type:"Broadcast"}});
     res.status(201).json(broadcast);
   });
 
@@ -504,7 +514,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
     thread.messages.push(message);
     thread.status = isParent ? "Needs reply" : "Open";
     thread.unread = isParent ? thread.unread + 1 : 0;
-    audit(state, isParent ? "Parent" : "Teacher", `Added message in ${thread.child} thread`, req.auth.centreId, "Message");
+    recordAudit(req,{action:"message.created",resourceType:"MessageThread",resourceId:thread.id,legacy:{actor:isParent?"Parent":"Teacher",text:`Added message in ${thread.child} thread`,type:"Message"}});
     res.status(201).json(message);
   });
 
@@ -715,7 +725,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       : { start: usage.start, count: usage.count + 1 });
     const centreSettings = state.settingsByCentre[req.auth.centreId];
     const result = demoExtract(message, centreSettings);
-    audit(state, "AI Service", `Generated ${result.tasks.length} extraction draft(s)`, req.auth.centreId, "AI", "Medium");
+    recordAudit(req,{action:"ai.extraction_drafted",resourceType:"AIExtraction",resourceId:nanoid(),legacy:{actor:"AI Service",text:`Generated ${result.tasks.length} extraction draft(s)`,type:"AI",risk:"Medium"}});
     return res.json({ ...result, requiresApproval: true });
   });
 
@@ -740,7 +750,7 @@ export function createApp({ enableDemoAuth = DEMO_TOKEN_AUTH_ENABLED, taskDbPath
       delete parsed.value.notificationChannels;
     }
     Object.assign(settings, parsed.value);
-    audit(state, "Centre Admin", "Updated centre policy settings", req.auth.centreId, "Admin", "Medium");
+    recordAudit(req,{action:"settings.updated",resourceType:"CentreSettings",resourceId:req.auth.centreId,legacy:{actor:"Centre Admin",text:"Updated centre policy settings",type:"Admin",risk:"Medium"}});
     return res.json(settings);
   });
 
