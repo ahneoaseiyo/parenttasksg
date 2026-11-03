@@ -59,3 +59,57 @@ test("OIDC checks live identity registry on every token verification",async()=>{
   active=false;
   await assert.rejects(verifier(token),/Identity not provisioned/);
 });
+
+
+function jwksFixture(fetchKeys,extra={}) {
+  const {publicKey,privateKey}=generateKeyPairSync("rsa",{modulusLength:2048});
+  const jwk=publicKey.export({format:"jwk"});
+  const make=(kid,signingKey=privateKey)=>{
+    const header=Buffer.from(JSON.stringify({alg:"RS256",kid})).toString("base64url");
+    const claims=Buffer.from(JSON.stringify({iss:"https://identity.example",aud:"parenttask-api",sub:"person",
+      iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+600})).toString("base64url");
+    const data=header+"."+claims;
+    return data+"."+sign("RSA-SHA256",Buffer.from(data),signingKey).toString("base64url");
+  };
+  const verifier=createOidcVerifier({issuer:"https://identity.example",audience:"parenttask-api",
+    jwksUrl:"https://identity.example/jwks",
+    resolveIdentity:()=>({userId:"u",role:"parent",centreId:"centre_a"}),fetchKeys,...extra});
+  return {jwk,privateKey,make,verifier};
+}
+
+test("unknown key IDs cannot trigger a JWKS fetch per request",async()=>{
+  let calls=0,jwk;
+  const fixture=jwksFixture(async()=>{calls++;return {ok:true,json:async()=>({keys:[{...jwk,kid:"real",alg:"RS256"}]})};});
+  jwk=fixture.jwk;
+  for(let i=0;i<10;i++)await assert.rejects(fixture.verifier(fixture.make("forged-"+i)));
+  assert.equal(calls,1);
+  assert.ok(await fixture.verifier(fixture.make("real")));
+  assert.equal(calls,1);
+});
+
+test("concurrent first requests share one JWKS fetch",async()=>{
+  let calls=0,jwk;
+  const fixture=jwksFixture(async()=>{calls++;await new Promise(r=>setTimeout(r,20));
+    return {ok:true,json:async()=>({keys:[{...jwk,kid:"real",alg:"RS256"}]})};});
+  jwk=fixture.jwk;
+  const results=await Promise.all(Array.from({length:8},()=>fixture.verifier(fixture.make("real"))));
+  assert.equal(results.length,8);
+  assert.equal(calls,1);
+});
+
+test("key rotation still works once the refresh cooldown has passed",async()=>{
+  const first=generateKeyPairSync("rsa",{modulusLength:2048});
+  const second=generateKeyPairSync("rsa",{modulusLength:2048});
+  let keys=[{...first.publicKey.export({format:"jwk"}),kid:"old",alg:"RS256"}];
+  const fixture=jwksFixture(async()=>({ok:true,json:async()=>({keys})}),{refreshCooldownMs:0});
+  assert.ok(await fixture.verifier(fixture.make("old",first.privateKey)));
+  keys=[...keys,{...second.publicKey.export({format:"jwk"}),kid:"new",alg:"RS256"}];
+  assert.ok(await fixture.verifier(fixture.make("new",second.privateKey)));
+});
+
+test("a failed initial JWKS fetch is throttled instead of retried per request",async()=>{
+  let calls=0;
+  const fixture=jwksFixture(async()=>{calls++;return {ok:false};});
+  for(let i=0;i<5;i++)await assert.rejects(fixture.verifier(fixture.make("any")));
+  assert.equal(calls,1);
+});

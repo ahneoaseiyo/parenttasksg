@@ -106,6 +106,7 @@ export function openTaskStore(filePath, seedTasks = []) {
         return this.get(id);
       });
     },
+    audit(event) { writeAudit(event); },
     listAudit(centreId) {
       return db.prepare(`SELECT id,centre_id AS centreId,time,actor_id AS actorId,
         actor_role AS actorRole,action,resource_type AS resourceType,

@@ -73,3 +73,39 @@ test("task write rolls back if audit insert fails", () => {
     store.close();
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
+
+
+test("broadcast, message, settings and AI events reach the durable admin audit log",async()=>{
+  const dir=mkdtempSync(join(tmpdir(),"parenttask-audit-all-"));
+  const path=join(dir,"tasks.sqlite");
+  let server;
+  try {
+    server=await start(path);
+    const secret="private-message-body-do-not-log";
+    assert.equal((await request(server,AUTH_TOKENS.teacherCentreA,"/api/broadcasts","POST",
+      {title:"Trip reminder",category:"Reminder",dueLabel:"Friday"})).status,201);
+    assert.equal((await request(server,AUTH_TOKENS.parentMeiLingCentreA,"/api/messages/threads/thread_1/messages","POST",
+      {text:secret})).status,201);
+    assert.equal((await request(server,AUTH_TOKENS.adminCentreA,"/api/settings","PATCH",{retentionMonths:12})).status,200);
+    assert.equal((await request(server,AUTH_TOKENS.teacherCentreA,"/api/ai/extract","POST",
+      {message:"Please bring a water bottle"})).status,200);
+    const events=(await request(server,AUTH_TOKENS.adminCentreA,"/api/audit")).body;
+    const actions=new Map(events.map(e=>[e.action,e]));
+    for(const action of ["broadcast.created","message.created","settings.updated","ai.extraction_drafted"])
+      assert.ok(actions.has(action),"missing audit action "+action);
+    assert.equal(actions.get("message.created").actorId,"parent_mei_ling");
+    assert.equal(actions.get("message.created").resourceId,"thread_1");
+    assert.equal(actions.get("settings.updated").resourceId,"centre_a");
+    assert.ok(!JSON.stringify(events).includes(secret),"message content must not be written to audit");
+    const otherCentre=(await request(server,AUTH_TOKENS.teacherCentreB,"/api/broadcasts")).body;
+    assert.deepEqual(otherCentre,[]);
+    await server.close();
+    server=await start(path);
+    const persisted=(await request(server,AUTH_TOKENS.adminCentreA,"/api/audit")).body;
+    assert.ok(persisted.some(e=>e.action==="settings.updated"));
+    assert.ok(persisted.some(e=>e.action==="message.created"));
+  } finally {
+    if(server) await server.close();
+    rmSync(dir,{recursive:true,force:true});
+  }
+});
