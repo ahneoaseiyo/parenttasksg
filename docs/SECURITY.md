@@ -22,3 +22,10 @@ Status: prototype only; not approved for live parent or child information.
 - Do not expose API or dev server to the public Internet.
 - Before a parent pilot, replace synthetic tokens with real authN/authZ, add validated input schemas, durable storage, retention/deletion, and full threat-model security tests.
 - Scan git history and dependency tree before any public deployment.
+
+## Message to Task (browser-only prototype)
+- Pasted messages are held only in React state, are never persisted, and are cleared on save; the app makes no network requests and logs nothing (enforced by `assistant.static.test.js`).
+- Only confirmed tasks (plus an optional short source excerpt) are written to `localStorage` under `message-task.v1`. Stored data is unencrypted and is re-validated on every load because it can be edited by anyone with access to the browser.
+- All message-derived text is untrusted: it is rendered only as React text, extractor output is validated by `normalizeExtraction()`, and copied Markdown is escaped.
+- No API keys, no AI provider, no inbox access, and no authentication changes. A future AI extractor must run behind an authenticated backend after a privacy review.
+- See `docs/message-to-task.md` for known limitations.

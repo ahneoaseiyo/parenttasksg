@@ -1,6 +1,8 @@
 # ParentTask SG
 
-React/Vite prototype for ParentTask SG, a Singapore-focused preschool parent task and consent workflow app.
+React/Vite prototype. The default screen is now **Message to Task**: paste a message, review the tasks in it, save them in your browser and copy the list. It uses a clearly labelled **demo extractor (fixed rules, not AI)**, needs no account or API key, and sends nothing anywhere. See [docs/message-to-task.md](docs/message-to-task.md). It is a prototype for synthetic messages only, not production software.
+
+The earlier ParentTask SG preschool demo (a Singapore-focused parent task and consent workflow) is still available at `http://127.0.0.1:5173/#/school-demo`.
 
 ## Run Locally
 
@@ -47,7 +49,7 @@ npm run preview
 
 ## Demo Notes
 
-- Parent and teacher flows are available from the login screen.
+- Open `/#/school-demo` first. Parent and teacher flows are then available from the login screen.
 - The government buyer brief is available from "View government buyer brief".
 - The centre admin console is available from "Centre admin console".
 - AI extraction is simulated in the frontend demo. A production version should route extraction through an approved backend with audit logging, access controls, and no API keys exposed to the browser.
