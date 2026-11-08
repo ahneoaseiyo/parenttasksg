@@ -46,7 +46,11 @@ test("no logging of messages or tasks", () => {
 test("untrusted text is never turned into HTML or code", () => {
   forbid(/dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML|document\.write|createContextualFragment|DOMParser/, "HTML sink");
   forbid(/\beval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*["'`]|setInterval\s*\(\s*["'`]/, "code evaluation");
-  forbid(/\bhref\s*=\s*\{/, "dynamic link target");
+  // Link targets may only come from the fixed section list (href={v.hash}), never from message or task text.
+  for (const [name, code] of sources) {
+    const dynamic = [...code.matchAll(/\bhref\s*=\s*\{([^}]*)\}/g)].map((m) => m[1].trim()).filter((expr) => expr !== "v.hash");
+    assert.deepEqual(dynamic, [], `dynamic link target in ${name}`);
+  }
   forbid(/window\.open|location\.(href|assign|replace)\s*=/, "navigation from content");
 });
 
@@ -54,7 +58,7 @@ test("browser storage is only touched by the storage module, and only for confir
   forbid(/localStorage|sessionStorage|indexedDB|document\.cookie|caches\./, "storage access", ["assistant/storage.js"]);
   const storage = sources.get("assistant/storage.js");
   assert.doesNotMatch(storage, /sessionStorage|indexedDB|document\.cookie/);
-  assert.equal((storage.match(/\.setItem\(/g) || []).length, 2, "one write plus the availability probe");
+  assert.equal((storage.match(/\.setItem\(/g) || []).length, 3, "tasks write, preferences write, and the availability probe");
   const app = sources.get("assistant/AssistantApp.jsx");
   assert.match(app, /taskStorage\.save\(/);
   assert.doesNotMatch(app, /taskStorage\.save\([^)]*state\.text/, "the pasted text is never passed to storage");
@@ -66,9 +70,9 @@ test("the extraction limits and demo labelling are the specified ones", async ()
   const demo = createDemoExtractor();
   assert.equal(demo.isDemo, true);
   assert.match(demo.label, /not AI/);
-  const app = sources.get("assistant/AssistantApp.jsx");
-  assert.match(app, /state\.extraction\.extractorLabel/, "results are labelled with the extractor that produced them");
-  assert.match(app, /not an AI model/);
+  const views = sources.get("assistant/views.jsx");
+  assert.match(views, /state\.extraction\.extractorLabel/, "results are labelled with the extractor that produced them");
+  assert.match(views, /not an AI model/);
 });
 
 test("the backend and the existing school demo are untouched by the assistant", () => {

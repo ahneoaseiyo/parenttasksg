@@ -138,3 +138,39 @@ test("browser storage that throws or is missing is detected safely", () => {
     if (original) Object.defineProperty(globalThis, "localStorage", original); else delete globalThis.localStorage;
   }
 });
+
+// ── preferences (three booleans, no message content) ──
+import { DEFAULT_PREFS, PREFS_KEY, createPrefsStorage } from "./storage.js";
+
+test("preferences default safely, round-trip, and ignore anything that is not a known boolean", () => {
+  const backing = new FakeStorage();
+  const prefs = createPrefsStorage(backing);
+  assert.deepEqual(prefs.load(), DEFAULT_PREFS);
+  assert.equal(DEFAULT_PREFS.keepSnippets, true);
+  assert.deepEqual(prefs.save({ keepSnippets: false, includeCompleted: true, includeSource: true }), { ok: true });
+  assert.deepEqual(createPrefsStorage(backing).load(), { keepSnippets: false, includeCompleted: true, includeSource: true });
+  backing.setItem(PREFS_KEY, JSON.stringify({ version: 1, keepSnippets: "yes", includeCompleted: 1, includeSource: true, secret: "x", __proto__: { a: 1 } }));
+  assert.deepEqual(prefs.load(), { keepSnippets: true, includeCompleted: false, includeSource: true });
+  for (const bad of ["{oops", "null", "[]", JSON.stringify({ version: 2, keepSnippets: false })]) {
+    backing.setItem(PREFS_KEY, bad);
+    assert.deepEqual(prefs.load(), DEFAULT_PREFS, bad);
+  }
+  const saved = JSON.parse((prefs.save({ keepSnippets: false, extra: "message text" }), backing.getItem(PREFS_KEY)));
+  assert.deepEqual(Object.keys(saved).sort(), ["includeCompleted", "includeSource", "keepSnippets", "version"], "only known fields are written");
+});
+
+test("preference storage failures and clearing are handled quietly", () => {
+  const backing = new FakeStorage();
+  const prefs = createPrefsStorage(backing);
+  prefs.save({ includeSource: true });
+  assert.deepEqual(prefs.clear(), { ok: true });
+  assert.equal(backing.getItem(PREFS_KEY), null);
+  backing.failWrites = true;
+  assert.deepEqual(prefs.save({ includeSource: true }), { ok: false });
+  backing.failReads = true;
+  assert.deepEqual(prefs.load(), DEFAULT_PREFS);
+  assert.deepEqual(createPrefsStorage(null).save({}), { ok: false });
+  assert.deepEqual(createPrefsStorage(null).load(), DEFAULT_PREFS);
+  backing.failRemove = true;
+  assert.deepEqual(prefs.clear(), { ok: false });
+});

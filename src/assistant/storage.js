@@ -57,3 +57,32 @@ export function createTaskStorage(storage = getBrowserStorage(), key = STORAGE_K
     },
   };
 }
+
+export const PREFS_KEY = "message-task.prefs.v1";
+export const DEFAULT_PREFS = Object.freeze({ keepSnippets: true, includeCompleted: false, includeSource: false });
+
+/** Three on/off preferences only. No message content ever goes here. */
+export function createPrefsStorage(storage = getBrowserStorage(), key = PREFS_KEY) {
+  const clean = (raw) => {
+    const prefs = { ...DEFAULT_PREFS };
+    if (raw && typeof raw === "object") for (const name of Object.keys(DEFAULT_PREFS)) if (typeof raw[name] === "boolean") prefs[name] = raw[name];
+    return prefs;
+  };
+  return {
+    load() {
+      try {
+        const text = storage?.getItem(key);
+        if (!text) return { ...DEFAULT_PREFS };
+        const parsed = JSON.parse(text);
+        return clean(parsed?.version === 1 ? parsed : null);
+      } catch { return { ...DEFAULT_PREFS }; }
+    },
+    save(prefs) {
+      if (!storage) return { ok: false };
+      try { storage.setItem(key, JSON.stringify({ version: 1, ...clean(prefs) })); return { ok: true }; } catch { return { ok: false }; }
+    },
+    clear() {
+      try { storage?.removeItem(key); return { ok: true }; } catch { return { ok: false }; }
+    },
+  };
+}
