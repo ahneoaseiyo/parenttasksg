@@ -43,17 +43,18 @@ export function createTaskStorage(storage = getBrowserStorage(), key = STORAGE_K
       return { tasks, problem: tasks.length < parsed.tasks.length ? "partial" : null };
     },
     save(tasks) {
-      if (!storage) return { ok: false, error: "Browser storage is unavailable, so tasks will be lost when this tab closes." };
+      if (!storage) return { ok: false, reason: "unavailable", error: "Browser storage is unavailable, so this change could not be saved." };
       try {
         storage.setItem(key, JSON.stringify({ version: VERSION, tasks }));
         return { ok: true, error: null };
       } catch {
-        return { ok: false, error: "Browser storage is full or blocked. Your latest change was not saved." };
+        return { ok: false, reason: "failed", error: "Browser storage is full or blocked. Your latest change was not saved." };
       }
     },
+    // ok only if the data is really gone: a removal that "succeeds" but leaves the key behind is a failure.
     clear() {
       if (!storage) return { ok: true };
-      try { storage.removeItem(key); return { ok: true }; } catch { return { ok: false }; }
+      try { storage.removeItem(key); return storage.getItem(key) === null ? { ok: true } : { ok: false }; } catch { return { ok: false }; }
     },
   };
 }
@@ -82,7 +83,7 @@ export function createPrefsStorage(storage = getBrowserStorage(), key = PREFS_KE
       try { storage.setItem(key, JSON.stringify({ version: 1, ...clean(prefs) })); return { ok: true }; } catch { return { ok: false }; }
     },
     clear() {
-      try { storage?.removeItem(key); return { ok: true }; } catch { return { ok: false }; }
+      try { storage?.removeItem(key); return !storage || storage.getItem(key) === null ? { ok: true } : { ok: false }; } catch { return { ok: false }; }
     },
   };
 }
