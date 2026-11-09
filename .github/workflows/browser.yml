@@ -22,7 +22,7 @@ jobs:
       - name: Install Chromium
         run: npx --no-install playwright install --with-deps chromium
       - name: Run browser tests
-        run: npx --no-install playwright test tests/browser.spec.js --reporter=line
+        run: npx --no-install playwright test --reporter=line
       - name: Upload test report on failure
         if: failure()
         uses: actions/upload-artifact@v4

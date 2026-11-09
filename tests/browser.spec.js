@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 async function openDashboard(page) {
-  await page.goto("/");
+  await page.goto("/#/school-demo"); // the earlier school-parent prototype now lives on this route
   await page.getByRole("button", { name: /Sign in with email/i }).click();
   await page.getByPlaceholder("e.g. Arielle").fill("Arielle");
   await page.getByRole("button", { name: "K1", exact: true }).click();
