@@ -243,6 +243,79 @@ test.describe("accessibility", () => {
   });
 });
 
+test.describe("storage failures in a real browser", () => {
+  // Makes the browser's own localStorage throw real DOMExceptions for this app's keys, on demand.
+  async function failableStorage(page) {
+    await page.addInitScript(() => {
+      window.__fail = { write: false, remove: false };
+      const set = Storage.prototype.setItem; const remove = Storage.prototype.removeItem;
+      Storage.prototype.setItem = function (k, v) { if (window.__fail.write && String(k).startsWith("message-task.")) throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); return set.call(this, k, v); };
+      Storage.prototype.removeItem = function (k) { if (window.__fail.remove && String(k).startsWith("message-task.")) throw new DOMException("Blocked", "SecurityError"); return remove.call(this, k); };
+    });
+  }
+  const fail = (page, what, value) => page.evaluate(([w, v]) => { window.__fail[w] = v; }, [what, value]);
+  const storedTasks = (page) => page.evaluate(() => { const raw = localStorage.getItem("message-task.v1"); return raw ? JSON.parse(raw).tasks.length : 0; });
+
+  test("a save that hits the storage quota is not reported as saved, keeps the review, and can be retried", async ({ page }) => {
+    await failableStorage(page);
+    await open(page, { width: 1280, height: 900 });
+    await extractSample(page);
+    await page.getByLabel("Task title").first().fill("Bring water bottle and clothes");
+    while (await page.getByRole("button", { name: "No deadline", exact: true }).count()) await page.getByRole("button", { name: "No deadline", exact: true }).first().click();
+    await page.getByLabel("I have checked these tasks and want to save them on this device.").check();
+    await fail(page, "write", true);
+    await page.getByRole("button", { name: "Save 6 tasks" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "not saved because browser storage is full or blocked" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Extract & Review", level: 1 })).toBeVisible();
+    await expect(page.locator("article")).toHaveCount(6);
+    await expect(page.getByLabel("Task title").first()).toHaveValue("Bring water bottle and clothes");
+    await expect(page.getByLabel("I have checked these tasks and want to save them on this device.")).toBeChecked();
+    await expect(page.getByText(/^Saved \d+ tasks? on this device/)).toHaveCount(0);
+    expect(await storedTasks(page)).toBe(0);
+    await fail(page, "write", false);
+    await page.getByRole("button", { name: "Save 6 tasks" }).click();
+    await expect(page.getByRole("heading", { name: "My Tasks", level: 1 })).toBeVisible();
+    await expect(page.getByRole("status").first()).toHaveText("Saved 6 tasks on this device.");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    expect(await storedTasks(page)).toBe(6);
+  });
+
+  test("completing a task while storage is failing does not change what is shown", async ({ page }) => {
+    await failableStorage(page);
+    await open(page, { width: 1280, height: 900 });
+    await extractSample(page);
+    await resolveAndSave(page);
+    await fail(page, "write", true);
+    await page.getByRole("button", { name: "Mark done: Send the final slides" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Your latest change was not saved" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Mark done: Send the final slides" })).toHaveAttribute("aria-pressed", "false");
+    await page.reload();
+    await go(page, "My Tasks");
+    await expect(page.getByRole("button", { name: "Mark done: Send the final slides" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("a Clear all data that the browser blocks does not claim deletion, and can be retried", async ({ page }) => {
+    await failableStorage(page);
+    await open(page, { width: 1280, height: 900 });
+    await extractSample(page);
+    await resolveAndSave(page);
+    await go(page, "Settings");
+    await fail(page, "remove", true);
+    await page.getByRole("button", { name: "Clear all data" }).click();
+    await page.getByRole("button", { name: "Yes, delete everything" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: /could not be deleted|Nothing was deleted/ })).toBeVisible();
+    await expect(page.getByText(/were deleted from this browser/)).toHaveCount(0);
+    await expect(page.getByText("6 tasks saved in this browser.")).toBeVisible();
+    expect(await storedTasks(page)).toBe(6);
+    await expect(page.getByRole("button", { name: "Yes, delete everything" })).toBeVisible();
+    await fail(page, "remove", false);
+    await page.getByRole("button", { name: "Yes, delete everything" }).click();
+    await expect(page.getByRole("status").first()).toContainText("were deleted from this browser");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("message-task.")))).toEqual([]);
+  });
+});
+
 test.describe("workflow in a real browser", () => {
   test("paste → extract → review → save → copy, with history, settings and clear-all", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
