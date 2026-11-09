@@ -1,4 +1,4 @@
-import test, { after, before } from "node:test";
+import test, { after, afterEach, before } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
@@ -39,6 +39,11 @@ class FakeStorage {
 }
 
 // ── tiny DOM helpers ──────────────────────────────────────────────────────────
+const mounted = new Set();
+afterEach(async () => { // a failed assertion must not leak a mounted app into the next test
+  for (const app of [...mounted]) await app.unmount().catch(() => {});
+  mounted.clear();
+});
 async function mount(props = {}) {
   dom.window.history.replaceState(null, "", "/"); // every test starts on Extract & Review
   const container = document.body.appendChild(document.createElement("div"));
@@ -48,7 +53,9 @@ async function mount(props = {}) {
   const prefsStorage = props.prefsStorage ?? createPrefsStorage(backing);
   const element = React.createElement(AssistantApp, { getToday: () => TODAY, getNow: () => new Date("2026-11-04T01:00:00Z"), storage, prefsStorage, ...props.app });
   await React.act(async () => { root.render(props.strict ? React.createElement(React.StrictMode, null, element) : element); });
-  return { container, root, backing, storage, unmount: async () => { await React.act(async () => root.unmount()); container.remove(); } };
+  const app = { container, root, backing, storage, unmount: async () => { mounted.delete(app); await React.act(async () => root.unmount()); container.remove(); } };
+  mounted.add(app);
+  return app;
 }
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
 const spaced = (el) => { const out = []; const walk = (n) => { if (n.nodeType === 3) { const t = n.textContent.trim(); if (t) out.push(t); } else n.childNodes.forEach(walk); }; walk(el); return out.join(" "); };
@@ -341,7 +348,7 @@ test("an extractor failure shows a generic error and never echoes the message", 
   await app.unmount();
 });
 
-test("unavailable or full browser storage is reported and tasks still work in memory", async () => {
+test("unavailable or full browser storage is reported, and a save that fails is not reported as saved", async () => {
   const none = await mount({ storage: createTaskStorage(null) });
   assert.match(text(none.container.querySelector('[role="alert"]')), /Browser storage is unavailable/);
   await none.unmount();
@@ -358,8 +365,11 @@ test("unavailable or full browser storage is reported and tasks still work in me
   await click(byLabel(c, confirmLabel));
   full.setItem = () => { throw new Error("quota"); };
   await click(button(c, "Save 6 tasks"));
-  assert.match(text(c.querySelector(".mt-error")), /full or blocked/);
-  assert.equal(c.querySelectorAll(".mt-task").length, 6, "tasks stay visible for this session");
+  assert.match(text(c.querySelector(".mt-error")), /not saved because browser storage is full or blocked/);
+  assert.equal(h1(c), "Extract & Review", "a failed save does not navigate away");
+  assert.equal(c.querySelectorAll("article").length, 6, "the reviewed tasks are kept so the person can retry");
+  assert.equal(c.querySelectorAll(".mt-task").length, 0, "nothing is shown as saved when it was not");
+  assert.equal(full.getItem(STORAGE_KEY), null);
   await app.unmount();
 });
 
@@ -591,4 +601,230 @@ test("routing: the assistant is the default screen and the school demo is reacha
   await React.act(async () => root.unmount());
   container.remove();
   window.history.replaceState(null, "", "/");
+});
+
+// ── Persistence failures must never be reported as success ────────────────────
+
+class FlakyStorage extends FakeStorage {
+  constructor() { super(); this.writeErrors = new Map(); this.removeErrors = new Set(); this.silentRemove = new Set(); }
+  setItem(key, value) { if (this.writeErrors.has(key)) throw this.writeErrors.get(key); super.setItem(key, value); }
+  removeItem(key) {
+    if (this.removeErrors.has(key)) throw new dom.window.DOMException("Blocked", "SecurityError");
+    if (!this.silentRemove.has(key)) super.removeItem(key); // a silent failure leaves the key behind without throwing
+  }
+}
+const quotaError = () => new dom.window.DOMException("The quota has been exceeded.", "QuotaExceededError");
+const alertText = (c) => [...c.querySelectorAll('[role="alert"]')].map((a) => text(a)).join(" | ");
+const storedTitles = (backing) => JSON.parse(backing.getItem(STORAGE_KEY) ?? '{"tasks":[]}').tasks.map((t) => t.title);
+
+async function readyToSave(app) {
+  const c = app.container;
+  await pasteSampleAndExtract(app);
+  await typeInto(byLabel(card(c, 1), "Task title"), "Bring water bottle and clothes");
+  await click(button(card(c, 1), /^Assign to me/));
+  await resolveAmbiguous(c);
+  await typeInto(byLabel(card(c, 3), "Deadline"), "2026-12-21");
+  await click(byLabel(c, confirmLabel));
+}
+function assertReviewKept(c) {
+  assert.equal(h1(c), "Extract & Review", "a failed save does not navigate away");
+  assert.equal(c.querySelectorAll("article").length, 6, "all reviewed drafts are kept");
+  assert.equal(byLabel(card(c, 1), "Task title").value, "Bring water bottle and clothes", "title edit kept");
+  assert.equal(byLabel(card(c, 1), "Owner").value, "Me", "assign-to-me kept");
+  assert.equal(byLabel(card(c, 3), "Deadline").value, "2026-12-21", "deadline edit kept");
+  assert.equal(byLabel(card(c, 4), "Deadline").value, "", "the 'no deadline' decisions are kept");
+  assert.equal(byLabel(c, confirmLabel).checked, true, "the confirmation is kept");
+  assert.equal(button(c, "Save 6 tasks").disabled, false, "Save is available for a retry");
+  assert.equal(c.querySelectorAll(".mt-task").length, 0, "nothing is shown as saved");
+  assert.doesNotMatch(status(c), /Saved/, "no success message");
+}
+
+test("a successful save is stored, announced once, and moves to My Tasks", async () => {
+  const backing = new FlakyStorage();
+  const app = await mount({ backing });
+  const c = app.container;
+  await readyToSave(app);
+  await click(button(c, "Save 6 tasks"));
+  assert.equal(h1(c), "My Tasks");
+  assert.match(status(c), /^Saved 6 tasks on this device\.$/);
+  assert.equal(alertText(c), "", "no error is shown");
+  assert.equal(storedTitles(backing).length, 6);
+  assert.ok(storedTitles(backing).includes("Bring water bottle and clothes"));
+  assert.equal(c.querySelectorAll(".mt-task").length, 6, "what is shown is what was stored");
+});
+
+for (const [label, makeError, expected] of [
+  ["a failed localStorage write", () => new dom.window.DOMException("Blocked", "SecurityError"), /not saved because browser storage is full or blocked/],
+  ["storage quota exceeded", quotaError, /not saved because browser storage is full or blocked/],
+]) {
+  test(`${label} is reported, keeps the reviewed drafts, and can be retried`, async () => {
+    const backing = new FlakyStorage();
+    const app = await mount({ backing });
+    const c = app.container;
+    await readyToSave(app);
+    backing.writeErrors.set(STORAGE_KEY, makeError());
+    await click(button(c, "Save 6 tasks"));
+    assert.match(alertText(c), expected);
+    assert.equal(backing.getItem(STORAGE_KEY), null, "nothing was stored");
+    assertReviewKept(c);
+    // Retrying while it still fails behaves the same way, with no duplicate or stale state.
+    await click(button(c, "Save 6 tasks"));
+    assert.match(alertText(c), expected);
+    assertReviewKept(c);
+    // Once storage works again, the same review saves with all of its edits.
+    backing.writeErrors.delete(STORAGE_KEY);
+    await click(button(c, "Save 6 tasks"));
+    assert.equal(h1(c), "My Tasks");
+    assert.match(status(c), /^Saved 6 tasks on this device\.$/);
+    assert.equal(alertText(c), "", "the error clears after a successful retry");
+    assert.equal(storedTitles(backing).length, 6, "exactly one copy of each task");
+    assert.ok(storedTitles(backing).includes("Bring water bottle and clothes"), "the edits made before the failure were saved");
+  });
+}
+
+test("unavailable storage blocks the save, says so, and keeps the review", async () => {
+  const app = await mount({ storage: createTaskStorage(null) });
+  const c = app.container;
+  assert.match(alertText(c), /Browser storage is unavailable, so tasks cannot be saved in this browser/);
+  await readyToSave(app);
+  await click(button(c, "Save 6 tasks"));
+  assert.match(alertText(c), /not saved because browser storage is unavailable/);
+  assertReviewKept(c);
+});
+
+test("a failed write never leaves the screen out of step with storage when completing or deleting a task", async () => {
+  const backing = new FlakyStorage();
+  seed(backing, [task("a", { title: "First task" }), task("b", { title: "Second task" })]);
+  const app = await mount({ backing });
+  const c = app.container;
+  await goTo(c, "My Tasks");
+  backing.writeErrors.set(STORAGE_KEY, quotaError());
+  const stored = backing.getItem(STORAGE_KEY);
+
+  await click(button(c, "Mark done: First task"));
+  assert.match(alertText(c), /Your latest change was not saved/);
+  assert.equal(button(c, "Mark done: First task").getAttribute("aria-pressed"), "false", "the task still shows as open");
+  assert.equal(section(c, "group-completed").querySelectorAll(".mt-task").length, 0);
+  await click(button(c, "Delete task: Second task"));
+  assert.match(alertText(c), /Your latest change was not saved/);
+  assert.equal(c.querySelectorAll(".mt-task").length, 2, "the task is still listed");
+  assert.equal(backing.getItem(STORAGE_KEY), stored, "storage is untouched");
+  assert.doesNotMatch(status(c), /Saved|deleted/);
+
+  // A reload shows exactly what the screen showed.
+  await app.unmount();
+  const again = await mount({ backing });
+  await goTo(again.container, "My Tasks");
+  assert.equal(again.container.querySelectorAll(".mt-task").length, 2);
+  assert.equal(section(again.container, "group-completed").querySelectorAll(".mt-task").length, 0);
+  await again.unmount();
+
+  // When storage recovers, the same actions work and the error goes away.
+  const recovered = await mount({ backing });
+  await goTo(recovered.container, "My Tasks");
+  backing.writeErrors.delete(STORAGE_KEY);
+  await click(button(recovered.container, "Mark done: First task"));
+  assert.equal(alertText(recovered.container), "");
+  assert.equal(JSON.parse(backing.getItem(STORAGE_KEY)).tasks.find((t) => t.id === "a").status, "done");
+  await click(button(recovered.container, "Delete task: Second task"));
+  assert.deepEqual(storedTitles(backing), ["First task"]);
+});
+
+// ── Clear all data ────────────────────────────────────────────────────────────
+
+async function clearSetup({ messageText = "Please bring a pen." } = {}) {
+  const backing = new FlakyStorage();
+  seed(backing, [task("a", { title: "Pay the fee" }), task("b", { title: "Send slides" })]);
+  backing.setItem(PREFS_KEY, JSON.stringify({ version: 1, keepSnippets: false, includeCompleted: true, includeSource: false }));
+  const app = await mount({ backing });
+  const c = app.container;
+  await typeInto(byLabel(c, "Message"), messageText);
+  await goTo(c, "Settings");
+  await click(button(c, "Clear all data"));
+  return { backing, app, c };
+}
+const confirmDelete = (c) => click(button(c, "Yes, delete everything"));
+const COMPLETE_CLAIM = /All saved tasks, settings and the current message were deleted/;
+
+test("a successful Clear all data removes everything and says so", async () => {
+  const { backing, c } = await clearSetup();
+  await confirmDelete(c);
+  assert.equal(backing.getItem(STORAGE_KEY), null);
+  assert.equal(backing.getItem(PREFS_KEY), null);
+  assert.equal(alertText(c), "");
+  assert.match(status(c), COMPLETE_CLAIM);
+  assert.equal(byLabel(c, "Include completed tasks when copying").checked, false, "settings are back to defaults");
+  assert.equal(c.querySelector('[role="group"][aria-label="Confirm deleting all data"]'), null, "the confirmation closes");
+  await goTo(c, "My Tasks");
+  assert.equal(c.querySelectorAll(".mt-task").length, 0);
+  await goTo(c, "Extract & Review");
+  assert.equal(byLabel(c, "Message").value, "", "the message being worked on is cleared on a complete deletion");
+});
+
+test("if saved tasks cannot be deleted, it does not claim deletion and the tasks stay visible and stored", async () => {
+  const { backing, app, c } = await clearSetup();
+  backing.removeErrors.add(STORAGE_KEY);
+  await confirmDelete(c);
+  assert.match(alertText(c), /saved tasks could not be deleted from this browser and are still saved here\. Your settings were deleted\./);
+  assert.doesNotMatch(text(c), COMPLETE_CLAIM);
+  assert.doesNotMatch(status(c), /deleted/);
+  assert.ok(backing.getItem(STORAGE_KEY), "the tasks really are still stored");
+  assert.equal(backing.getItem(PREFS_KEY), null, "the settings really were removed");
+  assert.match(text(c), /2 tasks saved in this browser/, "the screen matches what is stored");
+  assert.equal(byLabel(c, "Include completed tasks when copying").checked, false, "settings show the defaults they now have");
+  assert.ok(button(c, "Yes, delete everything"), "the confirmation stays open so it can be retried");
+  await goTo(c, "My Tasks");
+  assert.equal(c.querySelectorAll(".mt-task").length, 2);
+  await goTo(c, "Extract & Review");
+  assert.equal(byLabel(c, "Message").value, "Please bring a pen.", "the message being worked on is not discarded by a failed deletion");
+  // Retry once the browser allows it.
+  await goTo(c, "Settings");
+  backing.removeErrors.clear();
+  await confirmDelete(c);
+  assert.equal(backing.getItem(STORAGE_KEY), null);
+  assert.equal(alertText(c), "");
+  assert.match(status(c), COMPLETE_CLAIM);
+  await app.unmount();
+});
+
+test("if settings cannot be deleted, the tasks are removed, the settings stay, and the message is accurate", async () => {
+  const { backing, c } = await clearSetup();
+  backing.removeErrors.add(PREFS_KEY);
+  await confirmDelete(c);
+  assert.match(alertText(c), /saved tasks were deleted, but your settings could not be deleted from this browser/);
+  assert.doesNotMatch(text(c), COMPLETE_CLAIM);
+  assert.equal(backing.getItem(STORAGE_KEY), null, "the tasks really were removed");
+  assert.ok(backing.getItem(PREFS_KEY), "the settings really are still stored");
+  assert.match(text(c), /0 tasks saved in this browser/);
+  assert.equal(byLabel(c, "Include completed tasks when copying").checked, true, "settings show what is still stored");
+  assert.ok(button(c, "Yes, delete everything"), "retry is possible");
+  await goTo(c, "My Tasks");
+  assert.equal(c.querySelectorAll(".mt-task").length, 0);
+  await goTo(c, "Settings");
+  backing.removeErrors.clear();
+  await confirmDelete(c);
+  assert.equal(backing.getItem(PREFS_KEY), null);
+  assert.equal(alertText(c), "");
+  assert.match(status(c), COMPLETE_CLAIM);
+});
+
+test("if nothing can be deleted, nothing changes and the message says so", async () => {
+  const { backing, c } = await clearSetup();
+  backing.removeErrors.add(STORAGE_KEY); backing.removeErrors.add(PREFS_KEY);
+  await confirmDelete(c);
+  assert.match(alertText(c), /Nothing was deleted/);
+  assert.doesNotMatch(text(c), COMPLETE_CLAIM);
+  assert.ok(backing.getItem(STORAGE_KEY) && backing.getItem(PREFS_KEY));
+  assert.match(text(c), /2 tasks saved in this browser/);
+  assert.equal(byLabel(c, "Include completed tasks when copying").checked, true);
+  assert.ok(button(c, "Yes, delete everything"));
+});
+
+test("a removal that silently leaves the data behind is treated as a failure", async () => {
+  const { backing, c } = await clearSetup();
+  backing.silentRemove.add(STORAGE_KEY);
+  await confirmDelete(c);
+  assert.match(alertText(c), /saved tasks could not be deleted/);
+  assert.doesNotMatch(text(c), COMPLETE_CLAIM);
+  assert.match(text(c), /2 tasks saved in this browser/);
 });
