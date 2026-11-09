@@ -216,7 +216,7 @@ export function SettingsView({ prefs, onPref, taskCount, storageAvailable, confi
         <h2 id="set-data-h" className="mt-card-title">Your data</h2>
         <p>{PRIVACY_NOTICE}</p>
         <p className="mt-hint">
-          {storageAvailable ? `${plural(taskCount, "task")} saved in this browser.` : "Browser storage is unavailable, so tasks are kept only while this tab is open."}{" "}
+          {storageAvailable ? `${plural(taskCount, "task")} saved in this browser.` : "Browser storage is unavailable, so tasks cannot be saved in this browser."}{" "}
           They are not synchronised with other devices or accounts. Clearing your browser data also deletes them.
         </p>
         {!confirmClear ? (
