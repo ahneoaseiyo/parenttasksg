@@ -97,10 +97,17 @@ export default function AssistantApp({ extractor = demoExtractor, storage, prefs
     if (window.location.hash !== hash) window.location.hash = hash;
   }
 
+  // Writes to browser storage first and only then updates what is on screen, so the list shown is always
+  // the list that was stored. Returns the storage result so callers never report a success that did not happen.
   function persist(next) {
-    setTasks(next);
     const result = taskStorage.save(next);
-    setSaveError(result.ok ? null : result.error);
+    if (result.ok) {
+      setTasks(next);
+      setSaveError(null);
+    } else {
+      setSaveError(result.error);
+    }
+    return result;
   }
 
   function onPref(name, value) {
@@ -128,7 +135,15 @@ export default function AssistantApp({ extractor = demoExtractor, storage, prefs
     if (!canSave(state)) return;
     const created = confirmDrafts(state.drafts, { now: getNow(), messageDate: state.receivedDate, extractorId: state.extraction.extractorId, keepSnippets: state.keepSnippets });
     const merged = mergeTasks(tasks, created);
-    persist(merged.tasks);
+    const result = persist(merged.tasks);
+    if (!result.ok) {
+      // Keep the review, the confirmation and the edits exactly as they are so the person can try again.
+      setAnnounce("");
+      setSaveError(result.reason === "unavailable"
+        ? "Your tasks were not saved because browser storage is unavailable. Your reviewed tasks are still here."
+        : "Your tasks were not saved because browser storage is full or blocked. Your reviewed tasks are still here, so you can try again.");
+      return;
+    }
     const parts = [`Saved ${plural(merged.added, "task")} on this device.`];
     if (merged.skippedDuplicates) parts.push(`${plural(merged.skippedDuplicates, "duplicate")} skipped.`);
     if (merged.rejectedForLimit) parts.push(`${plural(merged.rejectedForLimit, "task")} not saved because the list is full.`);
@@ -144,16 +159,23 @@ export default function AssistantApp({ extractor = demoExtractor, storage, prefs
   }
 
   function onClearAll() {
-    taskStorage.clear();
-    prefsStore.clear();
-    setTasks([]);
-    setPrefs({ ...DEFAULT_PREFS });
-    setSaveError(null);
-    setStorageProblem(null);
-    setConfirmClear(false);
-    setCopied(null);
-    dispatch({ type: "reset", today });
-    setAnnounce("All saved tasks, settings and the current message were deleted from this browser.");
+    const tasksResult = taskStorage.clear();
+    const prefsResult = prefsStore.clear();
+    // Change only what was really deleted, so the screen never shows less than is still stored.
+    if (tasksResult.ok) { setTasks([]); setCopied(null); setStorageProblem(null); }
+    if (prefsResult.ok) { setPrefs({ ...DEFAULT_PREFS }); dispatch({ type: "keepSnippets/set", value: DEFAULT_PREFS.keepSnippets }); }
+    if (tasksResult.ok && prefsResult.ok) {
+      setSaveError(null);
+      setConfirmClear(false);
+      dispatch({ type: "reset", today });
+      setAnnounce("All saved tasks, settings and the current message were deleted from this browser.");
+      return;
+    }
+    // Incomplete: say exactly what happened, keep the confirmation open so it can be retried, and keep the message being worked on.
+    setAnnounce("");
+    setSaveError(!tasksResult.ok && !prefsResult.ok ? "Nothing was deleted: this browser blocked removing your saved tasks and settings. Try again."
+      : !tasksResult.ok ? "Your saved tasks could not be deleted from this browser and are still saved here. Your settings were deleted. Try again."
+      : "Your saved tasks were deleted, but your settings could not be deleted from this browser. Try again.");
   }
 
   const message = announce || state.notice;
@@ -202,7 +224,7 @@ export default function AssistantApp({ extractor = demoExtractor, storage, prefs
           <p className="mt-banner" role="status" aria-live="polite">{message}</p>
           {storageProblem === "unreadable" && <p className="mt-error" role="alert">Saved data on this device could not be read and was ignored.</p>}
           {storageProblem === "partial" && <p className="mt-error" role="alert">Some saved items were damaged and were skipped.</p>}
-          {!storageAvailable && <p className="mt-error" role="alert">Browser storage is unavailable, so tasks will be lost when this tab closes.</p>}
+          {!storageAvailable && <p className="mt-error" role="alert">Browser storage is unavailable, so tasks cannot be saved in this browser.</p>}
           {saveError && <p className="mt-error" role="alert">{saveError}</p>}
 
           {view === "extract" && <ExtractView state={state} dispatch={dispatch} todayLabel={todayLabel} onExtract={onExtract} onSave={onSave} reviewHeading={reviewHeading} />}
