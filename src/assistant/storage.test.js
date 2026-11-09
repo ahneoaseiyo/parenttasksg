@@ -174,3 +174,22 @@ test("preference storage failures and clearing are handled quietly", () => {
   backing.failRemove = true;
   assert.deepEqual(prefs.clear(), { ok: false });
 });
+
+test("save() says why it failed, and clear() only succeeds when the data is really gone", () => {
+  const backing = new FakeStorage();
+  const store = createTaskStorage(backing);
+  const prefs = createPrefsStorage(backing);
+  assert.deepEqual(createTaskStorage(null).save([]), { ok: false, reason: "unavailable", error: "Browser storage is unavailable, so this change could not be saved." });
+  backing.failWrites = true;
+  assert.deepEqual(store.save([task("a")]), { ok: false, reason: "failed", error: "Browser storage is full or blocked. Your latest change was not saved." });
+  backing.failWrites = false;
+  store.save([task("a")]); prefs.save({ keepSnippets: false });
+  const silent = Object.create(backing, { removeItem: { value() {} } }); // removal appears to work but changes nothing
+  assert.deepEqual(createTaskStorage(silent).clear(), { ok: false });
+  assert.deepEqual(createPrefsStorage(silent).clear(), { ok: false });
+  assert.ok(backing.getItem(STORAGE_KEY) && backing.getItem(PREFS_KEY), "the data is still there, and the result says so");
+  assert.deepEqual(store.clear(), { ok: true });
+  assert.deepEqual(prefs.clear(), { ok: true });
+  assert.equal(backing.getItem(STORAGE_KEY) ?? backing.getItem(PREFS_KEY), null);
+  assert.deepEqual(createTaskStorage(null).clear(), { ok: true }, "nothing to delete when there is no storage");
+});
