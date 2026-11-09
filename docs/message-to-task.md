@@ -95,6 +95,8 @@ Pasted text is untrusted, so Markdown output escapes brackets, angle brackets, b
 - Supporting excerpts are kept by default and may contain personal details; untick the option before saving to discard them.
 - Clipboard copying needs HTTPS or localhost; a manual-copy preview is offered if it is blocked. Escaped Markdown shows backslashes if pasted into a plain-text editor, so use "plain text" there.
 - Browser testing so far is headless Chromium on Linux only. Safari, Firefox, real phones and tablets, and screen readers (NVDA, VoiceOver, TalkBack) have **not** been tested, and no formal accessibility audit has been done. Requires browsers with `Object.hasOwn` and `<input type="date">` (Chrome 93+, Safari 15.4+, Firefox 92+).
+- If browser storage is unavailable, full or blocked, **saving is refused** rather than keeping tasks in memory: the review stays on screen with an error so you can retry, and completing or deleting a task is not applied. There is no "keep for this session only" mode. Likewise, Clear all data reports success only when every deletion is confirmed, and says exactly what remained otherwise.
+- Changing a setting does not yet check that the preference was actually written; if storage is blocked, it applies for the current page view only.
 - Local History is derived from saved tasks, so deleting a task removes it from history, and it cannot show anything about messages that were not saved.
 - The Gemini visual specification was not available (see Visual design above), so the look is similar in spirit at best and has not been compared against it.
 - The page and README still carry some ParentTask SG naming from the earlier prototype.
